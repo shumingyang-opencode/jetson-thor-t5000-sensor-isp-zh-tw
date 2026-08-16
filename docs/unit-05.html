@@ -37,6 +37,20 @@ v4l2-ctl -d /dev/video0 --set-fmt-video=width=1280,height=720,pixelformat=NV12</
 <div class="demo-block"><div class="demo-label">Holoscan 接收感測器（示意）</div><pre># Holoscan Operator 設定感測器源（HSB 通道）
 # 經乙太網路接收感測器資料進 GPU 管線</pre></div>
 <p class="hint">⚠️ HSB 取流 API 以 NVIDIA Holoscan 最新文件為準。</p>
+<h2>5.7 深入：取流的完整驗證</h2>
+<div class="demo-block"><div class="demo-label">OV9281 取流驗證</div><pre><span class="hl-c"># 確認 media 管線</span>
+media-ctl -p -d /dev/media0
+<span class="hl-c"># 取一幀</span>
+v4l2-ctl -d /dev/video0 --stream-mmap=1 --stream-count=1 --stream-to=f.yuv
+<span class="hl-c"># 檢查格式</span>
+v4l2-ctl -d /dev/video0 --list-formats-ext</pre></div>
+<div class="callout"><strong>通過標準：</strong>取到一幀 = 感測器→CSI→video 鏈路通。接著才談調校。</div>
+
+<h2>5.8 練習</h2>
+<ol>
+<li>跑完整取流流程，確認格式。</li>
+<li>記錄支援的 fourcc 清單。</li>
+</ol>
 
 
   <div class="outcome">

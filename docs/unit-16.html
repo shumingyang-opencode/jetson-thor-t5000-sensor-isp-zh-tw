@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>單元 16 · 多感測器與實作案例 · NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站</title>
+<meta name="description" content="HSB 多相機">
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>單元 16 · 多感測器與實作案例</h1>
+  <p class="subtitle">HSB 多相機</p>
+</header>
+
+<nav class="topnav">  <a href="../index.html">首頁</a>
+  <a href="../map.html">概念地圖</a>
+  <a href="../learning-path.html">學習路線</a>
+  <a href="../docs/index.html">單元教學</a>
+  <a href="../about.html">關於</a></nav>
+
+<div class="back-link"><a href="index.html">← 單元教學</a></div>
+
+<div class="guide">
+<h2>HSB 多感測器</h2>
+<p>Thor 的 <strong>Holoscan Sensor Bridge</strong> 支援「感測器走乙太網路」——多顆感測器（甚至分佈在不同位置）的資料匯流進 GPU，適合機器人多感測器融合。</p>
+<div class="pipe"><span class="step">多感測器</span><span class="arr">→</span><span class="step">HSB（乙太網路）</span><span class="arr">→</span><span class="step">Holoscan</span><span class="arr">→</span><span class="step">GPU 即時處理</span></div>
+<div class="callout warn"><strong>HSB 重點：</strong>① 頻寬規劃（25GbE）② 每顆感測器的時序同步 ③ host 端解包與格式匹配。</div>
+
+<h2>完整案例：Thor 上接一顆 OV9281</h2>
+<ol>
+<li>感測器走 MIPI（近距離）或 HSB（遠距離）。</li>
+<li>確認 I2C 通、讀到 ID、argus/Holoscan 出圖。</li>
+<li>確認 AE/AWB 自動收斂。</li>
+<li>RAW 分析（黑位、雜訊、缺陷像素）。</li>
+<li>NVIDIA 工具做 LSC / 色彩基準。</li>
+<li>不同場景回歸。</li>
+</ol>
+<p class="hint">⚠️ Thor 具體 SDK/工具以 NVIDIA 最新文件為準。</p>
+
+<h2>最佳實踐</h2>
+<ul>
+<li>固定測試場景，量化比較。</li>
+<li>讓 NVIDIA 自動化收斂，只干預異常。</li>
+<li>多感測器逐顆驗證、逐顆獨立 LSC。</li>
+<li>記錄每次改動與前後圖。</li>
+</ul>
+
+
+  <div class="outcome">
+    <strong>看完這單元你應該能說出：</strong>
+    <ul><li>HSB 多感測器與 Holoscan 管線。</li><li>Thor 接 OV9281 的完整案例。</li><li>「自動化收斂 + 只干預異常」哲學。</li><li>調校最佳實踐。</li></ul>
+  </div>
+
+  <h2>延伸閱讀</h2>
+  <ul>
+    <li>回顧全站：<a href="index.html">單元教學目錄</a>。</li>
+<li>對照站：<a href="https://shumingyang-opencode.github.io/jetson-orin-nano-sensor-isp-zh-tw/" rel="noopener">Orin Nano 站</a></li>
+    <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
+  </ul>
+
+  <div class="next-prev">
+    <a href="unit-15.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 15 · 四平台影像調校功能比較</div></a>
+    <a class="np-next" href="index.html"><div class="np-label">課程完成 →</div><div class="np-name">回首頁 · 單元教學目錄</div></a>
+  </div>
+</div>
+
+<footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
+  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；技術名詞與規格引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
+
+</div>
+</body>
+</html>

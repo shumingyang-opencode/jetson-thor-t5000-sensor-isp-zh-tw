@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>單元 15 · 四平台影像調校功能比較 · NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站</title>
+<meta name="description" content="Thor 視角">
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>單元 15 · 四平台影像調校功能比較</h1>
+  <p class="subtitle">Thor 視角</p>
+</header>
+
+<nav class="topnav">  <a href="../index.html">首頁</a>
+  <a href="../map.html">概念地圖</a>
+  <a href="../learning-path.html">學習路線</a>
+  <a href="../docs/index.html">單元教學</a>
+  <a href="../about.html">關於</a></nav>
+
+<div class="back-link"><a href="index.html">← 單元教學</a></div>
+
+<div class="guide">
+<h2>Thor T5000 在四平台中的位置</h2>
+<table>
+<tr><th>項目</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th><th><strong>Thor T5000</strong></th></tr>
+<tr><td>ISP 形態</td><td>開源 libcamera</td><td>感測器內建</td><td>NVIDIA ISP</td><td><strong>Blackwell + Holoscan</strong></td></tr>
+<tr><td>AE/AWB</td><td>libcamera ✅</td><td>sensor ⚠️</td><td>NVIDIA ✅✅</td><td><strong>NVIDIA ✅✅</strong></td></tr>
+<tr><td>LSC</td><td>✅</td><td>⚠️</td><td>✅</td><td><strong>✅</strong></td></tr>
+<tr><td>NR/Sharpen</td><td>✅</td><td>⚠️</td><td>✅✅</td><td><strong>✅✅</strong></td></tr>
+<tr><td>HDR</td><td>✅</td><td>⚠️</td><td>✅</td><td><strong>✅✅ 多幀</strong></td></tr>
+<tr><td>感測器路徑</td><td>CSI</td><td>CSI</td><td>CSI/GMSL</td><td><strong>CSI + HSB（乙太網路）</strong></td></tr>
+<tr><td>定位</td><td>學習</td><td>底層 DIY</td><td>工業量產</td><td><strong>次世代物理 AI</strong></td></tr>
+</table>
+<div class="callout"><strong>Thor 定位：</strong>四者中最「次世代」——Blackwell 運算 + HSB 乙太網路感測器 + 高階自動化調校，專為即時物理 AI（機器人、多感測器融合）而生。缺點是新平台、文件仍在演進。</div>
+
+<h2>選型建議</h2>
+<ul>
+<li><strong>學習/開源</strong> → RPi5。</li>
+<li><strong>底層/DIY</strong> → Orange Pi。</li>
+<li><strong>工業量產</strong> → Orin Nano。</li>
+<li><strong>次世代機器人/多感測器融合</strong> → Thor T5000。</li>
+</ul>
+
+
+  <div class="outcome">
+    <strong>看完這單元你應該能說出：</strong>
+    <ul><li>四平台調校能力差異。</li><li>Thor 的次世代定位與 HSB 優勢。</li><li>Thor 與 Orin 的關係。</li><li>依需求選平台。</li></ul>
+  </div>
+
+  <h2>延伸閱讀</h2>
+  <ul>
+    <li>下一篇：<a href="unit-16.html">單元 16 · 多感測器與實作案例</a>。</li>
+<li>對照站：<a href="https://shumingyang-opencode.github.io/orange-pi-sensor-isp-zh-tw/" rel="noopener">Orange Pi 站</a></li>
+    <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
+  </ul>
+
+  <div class="next-prev">
+    <a href="unit-14.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 14 · 清晰度、動態範圍與調校工作流</div></a>
+    <a class="np-next" href="unit-16.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 16 · 多感測器與實作案例</div></a>
+  </div>
+</div>
+
+<footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
+  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；技術名詞與規格引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
+
+</div>
+</body>
+</html>

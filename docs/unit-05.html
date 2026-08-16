@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>單元 5 · 第一個鏡頭跑起來 · NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站</title>
+<meta name="description" content="argus / HSB 取流">
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>單元 5 · 第一個鏡頭跑起來</h1>
+  <p class="subtitle">argus / HSB 取流</p>
+</header>
+
+<nav class="topnav">  <a href="../index.html">首頁</a>
+  <a href="../map.html">概念地圖</a>
+  <a href="../learning-path.html">學習路線</a>
+  <a href="../docs/index.html">單元教學</a>
+  <a href="../about.html">關於</a></nav>
+
+<div class="back-link"><a href="index.html">← 單元教學</a></div>
+
+<div class="guide">
+<h2>Jetson 標準取流</h2>
+<div class="demo-block"><div class="demo-label">argus 與 v4l2</div><pre>argus_camera --mode 0 --duration 1
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=1280,height=720,pixelformat=NV12</pre></div>
+<div class="callout"><strong>第一步驗證：</strong>argus_camera 能出圖 = 感測器→ISP→輸出鏈路通。</div>
+
+<h2>HSB / Holoscan 取流</h2>
+<div class="demo-block"><div class="demo-label">Holoscan 接收感測器（示意）</div><pre># Holoscan Operator 設定感測器源（HSB 通道）
+# 經乙太網路接收感測器資料進 GPU 管線</pre></div>
+<p class="hint">⚠️ HSB 取流的具體 API 以 NVIDIA Holoscan 最新文件為準。</p>
+
+
+  <div class="outcome">
+    <strong>看完這單元你應該能說出：</strong>
+    <ul><li>argus_camera / v4l2-ctl 取流。</li><li>「出圖 = 鏈路通」的驗證。</li><li>HSB 走 Holoscan 管線的概念。</li><li>Thor 與 Orin 取流的共通與差異。</li></ul>
+  </div>
+
+  <h2>延伸閱讀</h2>
+  <ul>
+    <li>下一篇：<a href="unit-06.html">單元 6 · Sensor Bring-up 與除錯</a>。</li>
+<li><a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">Holoscan SDK</a></li>
+    <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
+  </ul>
+
+  <div class="next-prev">
+    <a href="unit-04.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 4 · 平台相機框架與驅動</div></a>
+    <a class="np-next" href="unit-06.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 6 · Sensor Bring-up 與除錯</div></a>
+  </div>
+</div>
+
+<footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
+  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；技術名詞與規格引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
+
+</div>
+</body>
+</html>

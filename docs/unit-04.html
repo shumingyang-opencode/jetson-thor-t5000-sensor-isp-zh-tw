@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>單元 4 · 平台相機框架與驅動 · NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站</title>
+<meta name="description" content="Jetson 堆疊 + Holoscan">
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>單元 4 · 平台相機框架與驅動</h1>
+  <p class="subtitle">Jetson 堆疊 + Holoscan</p>
+</header>
+
+<nav class="topnav">  <a href="../index.html">首頁</a>
+  <a href="../map.html">概念地圖</a>
+  <a href="../learning-path.html">學習路線</a>
+  <a href="../docs/index.html">單元教學</a>
+  <a href="../about.html">關於</a></nav>
+
+<div class="back-link"><a href="index.html">← 單元教學</a></div>
+
+<div class="guide">
+<h2>Thor 的相機框架</h2>
+<p>Thor 沿用 Jetson 的 <strong>V4L2 + Argus</strong> 堆疊（與 Orin 一致），並以 <strong>Holoscan</strong> 做高效感測器資料處理。</p>
+<div class="pipe"><span class="step">感測器驅動</span><span class="arr">→</span><span class="step">V4L2/Argus</span><span class="arr">→</span><span class="step">Holoscan 管線</span><span class="arr">→</span><span class="step">GPU/ISP</span></div>
+<div class="callout"><strong>調整重點：</strong>Orin 上學的 V4L2/Argus 技能在 Thor 可延用；新的是 <strong>Holoscan Sensor Bridge</strong> 這條「感測器進 GPU」的快速通道。</div>
+
+<h2>HSB 的驅動/配置</h2>
+<ul>
+<li>HSB 把感測器資料封包走乙太網路，host 端用 Holoscan 解包。</li>
+<li>感測器本身的 register 控制仍走 I2C（經橋接）。</li>
+</ul>
+<p class="hint">⚠️ 需官方文件確認：Thor 的 HSB 感測器配置與驅動細節仍在演進。</p>
+
+
+  <div class="outcome">
+    <strong>看完這單元你應該能說出：</strong>
+    <ul><li>Thor 沿用 Jetson V4L2/Argus 堆疊。</li><li>Holoscan 在感測器資料處理的角色。</li><li>HSB 的資料路徑與 I2C 橋接。</li><li>Orin 技能可平移、HSB 是新技能。</li></ul>
+  </div>
+
+  <h2>延伸閱讀</h2>
+  <ul>
+    <li>下一篇：<a href="unit-05.html">單元 5 · 第一個鏡頭跑起來</a>。</li>
+<li><a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan SDK</a></li>
+    <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
+  </ul>
+
+  <div class="next-prev">
+    <a href="unit-03.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 3 · 感測器通訊介面</div></a>
+    <a class="np-next" href="unit-05.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 5 · 第一個鏡頭跑起來</div></a>
+  </div>
+</div>
+
+<footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
+  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；技術名詞與規格引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
+
+</div>
+</body>
+</html>

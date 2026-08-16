@@ -26,27 +26,36 @@
 <div class="back-link"><a href="index.html">← 單元教學</a></div>
 
 <div class="guide">
-<h2>Bring-up 四件事</h2>
+<h2>6.1 Bring-up 四件事</h2>
 <table>
-<tr><th>檢查項</th><th>驗證</th></tr>
-<tr><td>電源</td><td>AVDD/DVDD 到位、時序</td></tr>
-<tr><td>Clock</td><td>MCLK 輸出、PLL 鎖定</td></tr>
-<tr><td>I2C</td><td>i2cdetect（HSB 確認橋接）</td></tr>
-<tr><td>MIPI / HSB</td><td>dmesg 無錯 / Holoscan 收得到資料</td></tr>
+<tr><th>檢查項</th><th>驗證</th><th>工具</th></tr>
+<tr><td>電源</td><td>AVDD/DVDD 到位、時序</td><td>示波器/電表</td></tr>
+<tr><td>Clock</td><td>MCLK 輸出、PLL 鎖定</td><td>示波器 / dmesg</td></tr>
+<tr><td>I2C</td><td>i2cdetect（HSB 確認橋接）</td><td>i2c-tools</td></tr>
+<tr><td>MIPI / HSB</td><td>dmesg 無錯 / Holoscan 收得到資料</td><td>dmesg / Holoscan</td></tr>
 </table>
 
-<h2>HSB 除錯重點</h2>
+<h2>6.2 上電時序</h2>
+<div class="pipe"><span class="step">電源穩定</span><span class="arr">→</span><span class="step">MCLK</span><span class="arr">→</span><span class="step">RESET 釋放</span><span class="arr">→</span><span class="step">I2C 可通</span><span class="arr">→</span><span class="step">MIPI / HSB 輸出</span></div>
+<div class="callout warn"><strong>HSB 特別注意：</strong>感測器資料走乙太網路（25GbE），I2C 也經橋接。先確認「網路連通 + 橋接通」才談感測器 register。</div>
+
+<h2>6.3 HSB 除錯重點（三步）</h2>
 <div class="callout warn"><strong>HSB 三步：</strong>① 乙太網路連線與頻寬（25GbE）② 感測器端與 host 端格式匹配 ③ I2C 橋接通道。先確認「感測器資料有進 GPU」再談畫質。</div>
 
-<h2>Bring-up 決策樹</h2>
+<h2>6.4 用 dmesg 追線索</h2>
+<div class="demo-block"><div class="demo-label">除錯指令</div><pre>dmesg | grep -i -E "sensor|tegra|holoscan|csi|mipi"
+ip link show                              <span class="hl-c"># HSB 網路介面</span></pre></div>
+<p class="hint">⚠️ Thor 具體 dmesg 訊號以官方文件為準。</p>
+
+<h2>6.5 Bring-up 決策樹</h2>
 <div class="demo-block"><div class="demo-label">「取不到感測器資料」決策樹</div><pre>1. dmesg 有感測器/tegra probe？
-   ├─ error → DTB / 電源
+   ├─ error ─→ DTB / 電源
    └─ ok ─┐
 2. (HSB) 乙太網路連通？橋接通？
-   ├─ 否 → 網路 / 橋接
+   ├─ 否 ─→ 網路 / 橋接
    └─ 是 ─┐
 3. i2cdetect 讀到感測器 ID？
-   ├─ 否 → I2C / 位址
+   ├─ 否 ─→ I2C / 位址
    └─ 是 ─┐
 4. argus/Holoscan 出圖 → ✅</pre></div>
 

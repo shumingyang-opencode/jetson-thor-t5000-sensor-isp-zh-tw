@@ -31,21 +31,21 @@
 <tr><th>路徑</th><th>說明</th><th>適用</th></tr>
 <tr><td><strong>MIPI CSI-2</strong></td><td>16 lanes，最多 6 顆相機</td><td>近距離高速</td></tr>
 <tr><td><strong>Holoscan Sensor Bridge（HSB）</strong></td><td>感測器經乙太網路（25GbE）進 GPU</td><td>遠距離/多感測器融合</td></tr>
-<tr><td><strong>USB 相機</strong></td><td>即插即用</td><td>開發/快速原型</td></tr>
+<tr><td><strong>USB 相機</strong></td><td>即插即用</td><td>快速原型</td></tr>
 </table>
 <div class="pipe"><span class="step">感測器</span><span class="arr">→</span><span class="step">MIPI 或 HSB（乙太網路）</span><span class="arr">→</span><span class="step">camera offload engine</span><span class="arr">→</span><span class="step">GPU/ISP</span></div>
 
 <h2>軟體堆疊：Jetson + Holoscan</h2>
 <ul>
-<li><strong>Jetson 堆疊</strong>：V4L2 / Argus，與 Orin 系列一致。</li>
-<li><strong>Holoscan</strong>：NVIDIA 的感測器處理框架，負責把感測器資料（含 HSB）高效送入 GPU。</li>
+<li><strong>Jetson 堆疊</strong>：V4L2 / Argus（與 Orin 一致）。</li>
+<li><strong>Holoscan</strong>：感測器資料高效送入 GPU 的框架。</li>
 </ul>
-<div class="callout"><strong>重點：</strong>Thor 的「新」在於 <strong>HSB</strong>——感測器資料不再綁在短距離 CSI，而是走乙太網路，支援大規模多感測器與即時融合。</div>
+<div class="callout"><strong>重點：</strong>Thor 的「新」在 <strong>HSB</strong>——感測器資料不走短距離 CSI，而是乙太網路，支援大規模多感測器與即時融合。</div>
 
 
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
-    <ul><li>Thor 的三種感測器路徑。</li><li>MIPI CSI-2 16 lanes 的能力。</li><li>HSB（感測器走乙太網路）的意義。</li><li>Jetson 堆疊與 Holoscan 的分工。</li></ul>
+    <ul><li>Thor 三種感測器路徑。</li><li>MIPI CSI-2 16 lanes 能力。</li><li>HSB（感測器走乙太網路）意義。</li><li>Jetson 堆疊與 Holoscan 分工。</li></ul>
   </div>
 
   <h2>延伸閱讀</h2>
@@ -62,7 +62,7 @@
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
-  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；技術名詞與規格引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
+  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；規格與指令引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
 
 </div>
 </body>

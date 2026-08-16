@@ -29,17 +29,17 @@
 <table>
 <tr><th>格式</th><th>說明</th></tr>
 <tr><td><code>NV12</code> / <code>YUV</code></td><td>ISP 處理後</td></tr>
-<tr><td><code>SRGGB10</code> / Bayer RAW</td><td>感測器原始（調校分析用）</td></tr>
+<tr><td><code>SRGGB10</code> / Bayer RAW</td><td>感測器原始（調校分析）</td></tr>
 </table>
 
 <h2>HSB 的資料形式</h2>
-<p>HSB 把感測器資料封包走乙太網路，host 端解包後可選 RAW 或處理後。RAW 分析仍是影像品質的基礎。</p>
-<div class="callout warn"><strong>陷阱：</strong>Bayer order 設錯 → 全色錯。走 HSB 時，資料格式在感測器端與 host 端都要一致。</div>
+<p>HSB 把感測器資料封包走乙太網路，host 端解包可選 RAW 或處理後。RAW 分析仍是品質調校基礎。</p>
+<div class="callout warn"><strong>陷阱：</strong>Bayer order 設錯 → 全色錯。走 HSB 時，感測器端與 host 端格式要一致。</div>
 
 
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
-    <ul><li>RAW vs NV12 的用途。</li><li>HSB 資料封包的 RAW 分析。</li><li>Bayer order 陷阱。</li><li>RAW 在調校分析的角色。</li></ul>
+    <ul><li>RAW vs NV12 用途。</li><li>HSB 資料封包的 RAW 分析。</li><li>Bayer order 陷阱。</li><li>RAW 在調校分析角色。</li></ul>
   </div>
 
   <h2>延伸閱讀</h2>
@@ -56,7 +56,7 @@
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
-  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；技術名詞與規格引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
+  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；規格與指令引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span></footer>
 
 </div>
 </body>

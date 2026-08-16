@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>jetson-thor-t5000-sensor-isp-zh-tw · NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站</title>
-<meta name="description" content="<strong>Jetson Thor T5000</strong> 是 NVIDIA 次世代 Blackwell Jetson 平台——<strong>Holoscan Sensor Bridge（感測器走乙太網路）</strong>與高速 MIPI CSI-2，把「感測器資料進 GPU」推向即時 AI 極限。本站在「次世代物理 AI」視角下，帶你掌握 Thor 的影像調適。">
+<meta name="description" content="<strong>Jetson Thor T5000</strong> 是 NVIDIA 次世代 Blackwell Jetson 平台——<strong>Holoscan Sensor Bridge（感測器走乙太網路）</strong>是全新關鍵能力。本課程以<span class='ov'>OV9281</span> / <span class='ov'>OV5640</span> 為主例，帶你完成感測器初始化 → streaming → 調校。">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -13,9 +13,9 @@
 
 <header>
   <h1>NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站</h1>
-  <p class="subtitle">從感測器基礎到影像品質調適，中英對照的 16 單元教學</p>
-  <p class="badge-line">16 單元 · MIPI CSI-2 / Holoscan Sensor Bridge / ISP / 影像調校 · 內容 CC-BY-4.0</p>
-  <p class="tagline"><strong>Jetson Thor T5000</strong> 是 NVIDIA 次世代 Blackwell Jetson 平台——<strong>Holoscan Sensor Bridge（感測器走乙太網路）</strong>與高速 MIPI CSI-2，把「感測器資料進 GPU」推向即時 AI 極限。本站在「次世代物理 AI」視角下，帶你掌握 Thor 的影像調適。</p>
+  <p class="subtitle">手把手：感測器初始化（MIPI / HSB）→ Streaming → 調校</p>
+  <p class="badge-line">16 單元 · 深度實作 · MIPI CSI-2 / Holoscan Sensor Bridge / ISP · 內容 CC-BY-4.0</p>
+  <p class="tagline"><strong>Jetson Thor T5000</strong> 是 NVIDIA 次世代 Blackwell Jetson 平台——<strong>Holoscan Sensor Bridge（感測器走乙太網路）</strong>是全新關鍵能力。本課程以<span class='ov'>OV9281</span> / <span class='ov'>OV5640</span> 為主例，帶你完成感測器初始化 → streaming → 調校。</p>
 </header>
 
 <nav class="topnav">
@@ -45,7 +45,7 @@
     <div class="ec-icon">📚</div>
     <div class="ec-title">單元教學</div>
     <div class="ec-en">Lessons</div>
-    <div class="ec-desc">16 個單元循序漸進，含 5 個影像品質調校專章與跨平台比較。</div>
+    <div class="ec-desc">16 個深度實作單元，含 5 個影像調校專章與跨平台比較。</div>
     <div class="ec-pill"><span class="c-tag">16 單元</span><span class="c-tag">中英對照</span></div>
   </a>
   <a class="entry-card" href="about.html">
@@ -59,13 +59,13 @@
 
 <div class="guide" style="margin-top:2.6rem;">
   <h2>為什麼學這套課程？</h2>
-  <p><strong>Jetson Thor T5000</strong>（與同平台 <strong>T4000</strong>）是 NVIDIA 面向機器人與物理 AI 的 Blackwell 平台。相機上，它提供 <strong>MIPI CSI-2（16 lanes）</strong>、<strong>Holoscan Sensor Bridge（HSB，感測器經乙太網路）</strong>與 <strong>USB 相機</strong>三種路徑，並有 camera offload engine。</p>
-<p>本課程以 <span class="ov">OV9281</span> / <span class="ov">OV5640</span> 為感測器實例；Thor 特有細節不足處以同平台 <strong>T4000</strong> 資訊補充，並標記「需官方文件確認」。</p>
+  <p><strong>Thor T5000</strong>（同平台 <strong>T4000</strong>）面向機器人與物理 AI。相機上提供 <strong>MIPI CSI-2（16 lanes）</strong>、<strong>HSB（感測器經乙太網路）</strong>與 <strong>USB 相機</strong>三種路徑。</p>
+<p>Thor 為新平台，部分細節以同平台 <strong>T4000</strong> 資訊補充，並在文中標記「需官方文件確認」。本課程沿用 Jetson 調校心態：<strong>感測器 init 正確 + 場景合理，讓 NVIDIA 自動化收斂</strong>。</p>
 </div>
 
 <footer>
   這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
-  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；技術名詞與規格引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span>
+  <span class="footer-license">本站教學內容（繁體中文解說）為本站原創，採 CC-BY-4.0；規格與指令引用自 <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-thor/" rel="noopener">NVIDIA Jetson Thor 官方頁</a>、<a href="https://developer.nvidia.com/holoscan-sdk" rel="noopener">NVIDIA Holoscan</a> 與公開感測器資料。</span>
 </footer>
 
 </div>

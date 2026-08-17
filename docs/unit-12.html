@@ -212,6 +212,80 @@ gain_B  = 780 / 560 = 1.393
     <a href="unit-11.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 11 · 白平衡與色彩（AWB/CCM）</div></a>
     <a class="np-next" href="unit-13.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 13 · 雜訊與降噪</div></a>
   </div>
+
+  <h2>12.22 專案級端到端 Worked Example：LSC 校正專案 — 灰卡拍攝到網格部署</h2>
+  <p>場景：Thor 多感測器系統（廣角 + 標準鏡頭混用），需要為每顆建立 LSC 網格並部署到 ISP。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 拍攝條件
+   ├─ 均勻光源 + 灰卡 + 固定光圈/焦距/曝光
+   ├─ 固定 AWB（避免通道比例干擾）
+   └─ 通過：多張灰卡亮度一致
+
+M2 資料收集
+   ├─ 每顆感測器拍 10–20 張灰卡
+   └─ 通過：取平均排除 temporal noise
+
+M3 網格計算
+   ├─ 分四通道算 cell mean → gain = center/cell
+   ├─ 限制最大 gain（廣角 ≤ 4x）
+   └─ 通過：網格值合理、無跳變
+
+M4 網格驗證
+   ├─ 套入 ISP，重拍灰卡
+   ├─ 量四角亮度差 + 四通道比例
+   └─ 通過：四角亮度差 &lt; 5%、無偏色
+
+M5 雜訊檢查
+   ├─ 檢查角落 SNR（高增益區）
+   └─ 通過：SNR 可接受（或調整 max gain 限制）
+
+M6 多感測器部署
+   └─ 通過：每顆獨立網格 + 驗證表進 repo
+
+驗證：
+  四角亮度差 = (邊緣均亮 − 中心均亮) / 中心均亮</pre></div>
+  <div class="callout"><strong>專案要點：</strong>LSC 是「鏡頭+感測器」組合特有——每顆都要獨立做。廣角鏡頭一定要限制最大增益，否則角落雜訊爆炸。</div>
+
+  <h2>12.23 量測 / 驗證 SOP：LSC 校正與復驗</h2>
+  <div class="demo-block"><div class="demo-label">LSC SOP（Step 1–6）</div><pre>Step 1 固定條件
+   均勻光源箱 + 灰卡 + 固定光圈/曝光/焦距 + 固定 AWB
+Step 2 拍攝
+   10–20 張灰卡，取平均
+Step 3 計算網格
+   分通道 cell mean → gain；限制 max gain
+Step 4 套用
+   載入 ISP LSC 網格
+Step 5 復驗
+   重拍灰卡 → 四角亮度差 &lt; 5%、四通道比例一致
+Step 6 記錄
+   光圈/焦距/模式條件 + 網格 + 結果進 repo
+
+判讀指標：
+  四角仍暗 → 網格未生效 / 解析度模式不符
+  出現棋盤/波紋 → 網格過粗
+  角落雜訊大 → max gain 太高
+  角落偏色 → 分通道網格未正確套用</pre></div>
+
+  <h2>12.24 平台間對照：LSC 支援</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>LSC 引擎</td><td>NVIDIA ISP 網格</td><td>libcamera tuning</td><td>感測器內建（有限）</td><td>NVIDIA ISP 網格</td></tr>
+  <tr><td>校正工具</td><td>NVIDIA 工具</td><td>libcamera tuning 工具</td><td>手動 register</td><td>NVIDIA 工具</td></tr>
+  <tr><td>分通道網格</td><td>✅ R/Gr/Gb/B</td><td>✅</td><td>⚠️</td><td>✅</td></tr>
+  <tr><td>網格密度</td><td>可設定</td><td>可設定</td><td>固定</td><td>可設定</td></tr>
+  <tr><td>多感測器獨立 LSC</td><td>✅</td><td>⚠️（單一 camera）</td><td>❌</td><td>✅</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>LSC 的原理（cos⁴ + 分通道）四平台相同。Thor/Orin 支援多感測器獨立網格、可調密度；Orange Pi 幾乎只能靠感測器內建。</div>
+
+  <h2>12.25 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能說明 cos⁴ 定律並估算角落增益。</li>
+  <li>- [ ] 我能完成一次灰卡 LSC 校正（拍攝→網格→復驗）。</li>
+  <li>- [ ] 我能區分 luma shading 與 color shading 並分別處理。</li>
+  <li>- [ ] 我能設定廣角鏡頭的 max gain 限制。</li>
+  <li>- [ ] 我能判斷「換鏡頭後需要重校」。</li>
+  <li>- [ ] 我能驗證四角亮度差 &lt; 5% 且無棋盤格。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

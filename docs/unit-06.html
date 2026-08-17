@@ -183,6 +183,80 @@ dmesg | grep -i "hsb\|sensor\|holoscan"
     <a href="unit-05.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 5 · 第一個鏡頭跑起來</div></a>
     <a class="np-next" href="unit-07.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 7 · ISP 管線深入</div></a>
   </div>
+
+  <h2>6.18 專案級端到端 Worked Example：雙路徑 Bring-up 專案 — CSI 與 HSB 並行驗證</h2>
+  <p>場景：同一顆感測器模組要在 Thor 上同時支援 CSI（近距離、實驗室）與 HSB（遠距、量產）。專案目標：兩條路徑各自走完 bring-up，並證明「同一感測器、兩路徑、同一輸出」。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 硬體安裝（CSI）
+   ├─ 電源、MCLK、RESET、I2C、CSI 線
+   └─ 通過：i2cdetect 出現 0x36
+
+M2 CSI bring-up
+   ├─ dmesg 確認 probe → media graph → 取流
+   └─ 通過：CSI 路徑出圖
+
+M3 硬體安裝（HSB）
+   ├─ 乙太網路（25GbE）連到感測器橋接器
+   ├─ ip link up、ethtool Speed=25000
+   └─ 通過：ping 通、速率正確
+
+M4 HSB I2C 橋接
+   ├─ 找橋接 bus、i2cdetect、讀 ID
+   └─ 通過：0x36 在橋接 bus 出現
+
+M5 HSB 取流
+   ├─ Holoscan channel 設定 → SensorSourceOp
+   └─ 通過：Holoscan 出圖
+
+M6 一致性驗證
+   ├─ 同場景（固定光照）分別取 RAW
+   ├─ 比較黑位、Bayer、histogram
+   └─ 通過：兩路 RAW 內容一致（除了 HSB header offset）
+
+M7 環境變動復驗
+   └─ 通過：重插線材/換電源後重跑 M2/M5 全過</pre></div>
+  <div class="callout"><strong>專案要點：</strong>雙路徑 bring-up 的最大教訓：CSI 通了不代表 HSB 通。HSB 多了「乙太網路 + 橋接 + Holoscan 解包」三層，每一層都要獨立驗證。此專案完成後，產出的「雙路徑對照表」是量產調校的基礎。</div>
+
+  <h2>6.19 量測 / 驗證 SOP：Bring-up 五階段復驗</h2>
+  <div class="demo-block"><div class="demo-label">Bring-up SOP（Step 1–5）</div><pre>Step 1 電源
+   電表量 AVDD/DVDD；示波器查上電時序（若有）
+Step 2 Clock
+   dmesg 確認 MCLK 設定；cat /sys/kernel/debug/clk/clk_summary | grep mclk
+Step 3 I2C
+   i2cdetect -y &lt;bus&gt; → i2cget 0x300a → 0x92
+Step 4 資料路徑
+   CSI：media-ctl + v4l2-ctl 取幀
+   HSB：ethtool + i2cdetect(橋接bus) + Holoscan 出圖
+Step 5 記錄
+   每階段 log 存檔 + dmesg 收集
+
+判讀指標（dmesg）：
+  i2c transfer error      → I2C/位址/RESET
+  mclk ... not set        → clock/DTB
+  csi-2 recv timeout      → lane/速率/接線
+  HSB link down           → 網路層
+  以上全無 + 出圖        → bring-up 完成</pre></div>
+
+  <h2>6.20 平台間對照：Bring-up 流程與工具</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>供電驗證</td><td>電表/示波器</td><td>電表/示波器</td><td>電表/示波器</td><td>電表/示波器</td></tr>
+  <tr><td>DTB overlay</td><td>dtso + U-Boot/extlinux</td><td>config.txt dtoverlay</td><td>DTB patch</td><td>dtso + extlinux</td></tr>
+  <tr><td>Clock 管理</td><td>BPMP clock driver</td><td>vc4 / 簡單 clock</td><td>全志 clock</td><td>BPMP clock driver</td></tr>
+  <tr><td>HSB 乙太網路層</td><td>✅ 25GbE 橋接</td><td>❌</td><td>❌</td><td>❌</td></tr>
+  <tr><td>感測器 probe 訊息</td><td>dmesg（tegracam）</td><td>dmesg + libcamera log</td><td>dmesg</td><td>dmesg（tegracam）</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>Bring-up 的「四件事（電源/clock/I2C/資料路徑）」四平台相同。Thor/Orin 多一個 BPMP clock 層，HSB 多一個網路層——但驗證順序與邏輯完全可平移。</div>
+
+  <h2>6.21 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能說出 Bring-up 四件事與 HSB 的第五件事（網路層）。</li>
+  <li>- [ ] 我能照五階段 SOP 完成一次完整 bring-up 並記錄。</li>
+  <li>- [ ] 我能判讀 dmesg 五種常見錯誤訊號。</li>
+  <li>- [ ] 我能驗證上電時序（RESET 釋放順序、MCLK 頻率）。</li>
+  <li>- [ ] 我能建立 CSI 與 HSB 兩條路徑的對照驗證。</li>
+  <li>- [ ] 我能區分「網路通」與「感測器通」。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

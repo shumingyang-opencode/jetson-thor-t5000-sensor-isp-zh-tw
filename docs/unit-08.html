@@ -212,6 +212,77 @@ EOF</pre></div>
     <a href="unit-07.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 7 · ISP 管線深入</div></a>
     <a class="np-next" href="unit-09.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 9 · 各平台 ISP 架構差異</div></a>
   </div>
+
+  <h2>8.23 專案級端到端 Worked Example：RAW 工具鏈建立專案 — 解包、驗證、自動化</h2>
+  <p>場景：調校團隊需要一套「可重複使用的 RAW 分析工具鏈」，支援多感測器（RAW10/RAW12 混用）、CSI 與 HSB 雙路徑。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 單張解包
+   ├─ 寫 unpack_raw10 / unpack_raw12 函式
+   ├─ 用已知黑位驗證
+   └─ 通過：黑位 = 固定常數
+
+M2 stride 處理
+   ├─ 從 V4L2 query 回讀 bytesperline/sizeimage
+   ├─ decoder 依 bytesperline 前進
+   └─ 通過：多列連續無錯位
+
+M3 雙路徑支援
+   ├─ CSI 與 HSB 各建載入器
+   ├─ HSB 剝離 packet header
+   └─ 通過：兩路 RAW 內容一致
+
+M4 自動化檢查
+   ├─ Bayer order / 黑位 / histogram 自動輸出
+   └─ 通過：一鍵產出 RAW 健康報告
+
+M5 多感測器
+   ├─ 每路獨立 unpack 設定
+   └─ 通過：RAW10/RAW12 混用各自正確
+
+M6 整合 repo
+   └─ 通過：工具鏈 + 測試檔 + README 進 repo</pre></div>
+  <div class="callout"><strong>專案要點：</strong>RAW 工具鏈是「調校的顯微鏡」。一次投資，之後每個單元（黑位、雜訊、LSC、AWB）都靠它。最重要的一行：<code>bytesperline 永遠從 device query 回讀，不要假設</code>。</div>
+
+  <h2>8.24 量測 / 驗證 SOP：RAW 完整性驗證</h2>
+  <div class="demo-block"><div class="demo-label">RAW SOP（Step 1–6）</div><pre>Step 1 查 layout
+   v4l2-ctl -d /dev/video0 --get-fmt-video
+   # 記錄 bytesperline、sizeimage、fourcc
+Step 2 取 RAW
+   v4l2-ctl -d /dev/video0 --set-fmt-video=pixelformat=SRGGB10 --stream-mmap=3 --stream-count=1 --stream-to=r.raw
+Step 3 檔案大小
+   ls -l r.raw   # ≈ W×H×10/8（±padding）
+Step 4 解包驗證
+   python 解包 → 檢查黑位（固定常數）
+Step 5 Bayer order
+   拍白卡，四通道平均，Gr≈Gb
+Step 6 HSB 對照（若有）
+   剝 header 後與 CSI 的 RAW 比較
+
+判讀指標：
+  條紋規律 → packing/stride 錯
+  全圖偏色 → Bayer order 錯
+  黑位飄移 → 感測器/解包錯</pre></div>
+
+  <h2>8.25 平台間對照：RAW 擷取與格式</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>RAW fourcc</td><td>SRGGB10/12（V4L2）</td><td>rpicam --raw（DNG）</td><td>V4L2 RAW</td><td>SRGGB10/12（V4L2）</td></tr>
+  <tr><td>RAW 容器</td><td>raw buffer</td><td>DNG（含 metadata）</td><td>raw buffer</td><td>raw buffer</td></tr>
+  <tr><td>bytesperline 取得</td><td>V4L2 query</td><td>libcamera metadata</td><td>V4L2 query</td><td>V4L2 query</td></tr>
+  <tr><td>HSB 封包 header</td><td>✅ 需剝離</td><td>—</td><td>—</td><td>—</td></tr>
+  <tr><td>RAW10 packing</td><td>MIPI 4B/5P</td><td>同 MIPI（DNG 解包）</td><td>同 MIPI</td><td>同 MIPI</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>RAW 的位元層規則（MIPI packing、stride）跨平台一致。RPi5 的 DNG 容器最方便（附 metadata），Thor/Orin 的 raw buffer 最裸（要自己解）——但都是同一顆感測器的同一份資料。</div>
+
+  <h2>8.26 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能說出 RAW10 的 4-byte/5-pixel packing 規則並解包。</li>
+  <li>- [ ] 我能從 V4L2 query 讀出 bytesperline 與 sizeimage。</li>
+  <li>- [ ] 我能用白卡驗證 Bayer order、用黑框驗證黑位。</li>
+  <li>- [ ] 我能處理 HSB 的封包 header（剝離後再解析）。</li>
+  <li>- [ ] 我能管理 RAW10/RAW12 混用的多路 unpack 設定。</li>
+  <li>- [ ] 我能區分「packing 錯」「stride 錯」「Bayer 錯」三種症狀。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

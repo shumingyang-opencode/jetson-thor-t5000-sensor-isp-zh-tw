@@ -159,6 +159,76 @@ Gamma：code 經過非線性 → 128（8-bit 輸出）
     <a href="unit-06.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 6 · Sensor Bring-up 與除錯</div></a>
     <a class="np-next" href="unit-08.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 8 · RAW 擷取與資料格式</div></a>
   </div>
+
+  <h2>7.13 專案級端到端 Worked Example：ISP 管線驗證專案 — 逐區塊停用與啟用</h2>
+  <p>場景：你接手一個 Thor 專案，畫面「怪怪的」。專案目標：用「逐區塊停用實驗」建立對 ISP 管線的實證理解，並定位畫面異常來自哪個區塊。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 建立基準
+   ├─ 固定場景（灰卡 + 光源箱）
+   ├─ 固定曝光、關 AWB
+   └─ 通過：取得 RAW 與 YUV 基準檔
+
+M2 逐區塊停用
+   ├─ 依序停用：OB / LSC / Demosaic / NR / CCM / Gamma
+   ├─ 每停一個存一張 YUV
+   └─ 通過：每張對應「症狀 vs 區塊」觀察記錄
+
+M3 症狀→區塊對照
+   ├─ 整理「停用某區塊 → 出現什麼症狀」
+   └─ 通過：產出自己平台的區塊-症狀表
+
+M4 統計回饋檢查
+   ├─ 檢查 AE/AWB 統計是否隨區塊停用變化
+   └─ 通過：理解統計取樣點在哪個區塊之後
+
+M5 異常定位
+   ├─ 套回原參數，重新診斷初始「怪畫面」
+   └─ 通過：定位到具體區塊並提出修正
+
+M6 產出調校地圖
+   └─ 通過：repo 內有「區塊-症狀-調校參數」對照文件</pre></div>
+  <div class="callout"><strong>專案要點：</strong>ISP 調校最怕「瞎試」。逐區塊停用實驗把「症狀」綁定到「區塊」，之後任何畫面問題都能沿著對照表快速定位。</div>
+
+  <h2>7.14 量測 / 驗證 SOP：ISP 管線健康檢查</h2>
+  <div class="demo-block"><div class="demo-label">ISP SOP（Step 1–6）</div><pre>Step 1 固定條件
+   固定曝光、固定 AWB、固定光源、灰卡/色卡
+Step 2 取基準
+   RAW + YUV 各一組
+Step 3 統計檢查
+   看亮度直方圖、色平衡統計是否落在合理範圍
+Step 4 區塊停用掃描
+   依序停用區塊，各取一幀，記錄視覺變化
+Step 5 量化
+   比較每幀的 histogram（均亮、峰位、通道比例）
+Step 6 記錄
+   區塊-症狀-量化表 進 repo
+
+判讀指標：
+  停 OB    → 偏灰/偏綠     = OB 正常運作
+  停 LSC   → 角落變暗     = LSC 正常運作
+  停 CCM   → 色彩偏感測器原生 = CCM 正常運作
+  停 Gamma → 暗部變灰     = Gamma 正常運作</pre></div>
+
+  <h2>7.15 平台間對照：ISP 管線與統計</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>ISP 位置</td><td>Blackwell 硬體引擎</td><td>libcamera（CPU）</td><td>感測器內建</td><td>NVIDIA 硬體引擎</td></tr>
+  <tr><td>管線順序</td><td>OB→LSC→Demosaic→NR→CCM→Gamma</td><td>libcamera（可看原始碼）</td><td>感測器固定</td><td>同 NVIDIA 族</td></tr>
+  <tr><td>統計回饋</td><td>✅ AE/AWB 統計閉迴路</td><td>✅ IPA</td><td>⚠️ 感測器韌體</td><td>✅ 同 Thor</td></tr>
+  <tr><td>區塊可調性</td><td>受限（自動化為主）</td><td>全可調（開源）</td><td>幾乎不可調</td><td>受限</td></tr>
+  <tr><td>Multi-pass</td><td>✅ 支援</td><td>❌</td><td>❌</td><td>⚠️ 部分</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>「區塊-症狀」對照邏輯四平台通用，但「你能改哪個區塊」差異巨大——RPi5 全可調、Thor 靠自動化。先理解管線，再決定平台。</div>
+
+  <h2>7.16 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能背出 ISP 管線七個區塊的順序與職責。</li>
+  <li>- [ ] 我能追蹤一個 RAW code 通過管線各區塊的變化。</li>
+  <li>- [ ] 我能完成一次逐區塊停用實驗並產出對照表。</li>
+  <li>- [ ] 我能解釋 AE/AWB 統計回饋的閉迴路。</li>
+  <li>- [ ] 我能說出「黑位沒設對」如何連鎖影響 AWB。</li>
+  <li>- [ ] 我能比較 Thor 與 RPi5 的 ISP 可調性差異。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

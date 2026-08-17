@@ -163,6 +163,80 @@ QE = 60%，平均像素接收 5000 光子：
     <a href="unit-01.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 1 · 平台相機生態總覽</div></a>
     <a class="np-next" href="unit-03.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 3 · 感測器通訊介面</div></a>
   </div>
+
+
+
+  <h2>2.14 專案級端到端 Worked Example：感測器規格驗證專案 — 從 datasheet 到實測</h2>
+  <p>場景：你拿到一顆規格不明的感測器，要驗證 datasheet 聲稱的 full well、QE、global shutter 與 Bayer order。這個專案建立「感測器驗收」的可重複流程。</p>
+  <div class="demo-block"><div class="demo-label">規格驗證里程碑</div><pre>Phase 1  ID 與基礎（unit-03）
+   ├─ 讀 ID register，確認型號
+   └─ 通過：ID 符合 datasheet
+
+Phase 2  Bayer order（unit-02/08）
+   ├─ 拍純白卡，取 RAW
+   ├─ 檢查 R/Gr/Gb/B 四通道平均
+   └─ 通過：Gr≈Gb；輸出 RGGB 或記錄實際順序
+
+Phase 3  黑位與 dark current（unit-13）
+   ├─ 拍黑框（鏡頭蓋）取 RAW
+   ├─ 量 mean（black level）與 std（read noise）
+   └─ 通過：black level 固定、std 在感測器規格內
+
+Phase 4  full well 實測（unit-02）
+   ├─ 固定曝光，逐級增加光量（光源可調）
+   ├─ 找「code 不再上升」的光量點
+   └─ 通過：飽和 code ≈ 2^bitdepth − 1
+
+Phase 5  global shutter 驗證
+   ├─ 拍高速轉動物（扇葉）
+   ├─ 逐列是否扭曲（rolling）or 整幀同步（global）
+   └─ 通過：無果凍效應 → 確認 global
+
+Phase 6  產出規格表 + 進 repo
+   └─ 通過：文件含實測值 vs datasheet 對照</pre></div>
+  <div class="callout"><strong>專案要點：</strong>感測器 datasheet 是「理想值」，實測才是「你的模組值」。每顆焊接的模組因製程與溫度略有差異——驗收專案的目的就是量化這些差異，供後續調校當基準。</div>
+
+  <h2>2.15 量測 / 驗證 SOP：感測器關鍵參數量測</h2>
+  <div class="demo-block"><div class="demo-label">感測器參數 SOP（Step 1–6）</div><pre>Step 1  準備
+   黑框（鏡頭蓋）、白卡、灰卡、可調光源、三腳架
+Step 2  黑位 / read noise
+   固定曝光+gain，暗場取 20 張 RAW
+   mean=black level，std=read noise（unit-13.14）
+Step 3  Bayer order
+   白卡 RAW 四通道平均，判別排列
+Step 4  full well
+   逐步加光，找飽和點（unit-02.5 的估算公式反向驗證）
+Step 5  global shutter
+   高速轉動物體測試，判斷果凍效應
+Step 6  記錄
+   每一項記錄：mode、曝光、gain、溫度、光量
+
+判讀指標：
+  黑位：應為固定常數（unit-08）
+  read noise：隨 gain 線性放大 → 正常
+  full well：飽和 code 對應回電子數 ≈ datasheet ±20%</pre></div>
+
+  <h2>2.16 平台間對照：感測器支援生態</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>感測器生態</td><td>NVIDIA 官方 + 社群模組</td><td>Raspberry Pi 相機（最多）</td><td>Allwinner 相容模組</td><td>NVIDIA 官方 + 工業模組</td></tr>
+  <tr><td>Global shutter 支援</td><td>✅（OV9281 等）</td><td>✅（IMX296 等）</td><td>⚠️ 少</td><td>✅（OV9281 等）</td></tr>
+  <tr><td>感測器內建 ISP</td><td>❌（走 NVIDIA ISP）</td><td>❌（走 libcamera ISP）</td><td>✅（常啟用）</td><td>❌（走 NVIDIA ISP）</td></tr>
+  <tr><td>多顆同型號</td><td>✅ 6+</td><td>✅ 2（需 HAT）</td><td>⚠️ 1–2</td><td>✅ 4–6</td></tr>
+  <tr><td>感測器 ID/register 工具</td><td>i2c-tools</td><td>i2c-tools</td><td>i2c-tools</td><td>i2c-tools</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>感測器層「原理與 register 完全相同」，差異在「誰支援這顆感測器的驅動」。選平台前先查該感測器在平台上的 driver 與 DTB 支援度。</div>
+
+  <h2>2.17 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能說出光子 → 電子 → code 的完整鏈路，並估算一顆像素的輸出 code。</li>
+  <li>- [ ] 我能用白卡 RAW 判斷 Bayer order，並說出 Gr≠Gb 的意義。</li>
+  <li>- [ ] 我能解釋 global shutter 對帶狀光源與快速移動物免疫的原因。</li>
+  <li>- [ ] 我能量測黑位與 read noise（暗場多張平均）。</li>
+  <li>- [ ] 我能設計一個 full well 實測實驗。</li>
+  <li>- [ ] 我能說出「感測器層原理跨平台相同」的證據。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

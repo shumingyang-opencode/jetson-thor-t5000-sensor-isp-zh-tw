@@ -190,6 +190,79 @@ tone mapping：用 S 曲線（log 或自訂）：
     <a href="unit-13.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 13 · 雜訊與降噪</div></a>
     <a class="np-next" href="unit-15.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 15 · 四平台影像調校功能比較</div></a>
   </div>
+
+  <h2>14.17 專案級端到端 Worked Example：完整調校工作流專案 — 從 RAW 到量產回歸</h2>
+  <p>場景：工業檢測專案（食品瑕疵偵測）要從零完成整套調校並交付量產。整合 unit-01~16 的所有技能。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 感測器 init + bring-up（unit-06）
+   ├─ OV9281 1280×800 RAW10 @ 60 fps
+   └─ 通過：dmesg probe + 取流
+
+M2 資料基礎（unit-08）
+   ├─ RAW 解包工具鏈
+   └─ 通過：黑位/Bayer 驗證
+
+M3 校正順序（unit-07/11/12）
+   ├─ 黑位 → LSC → AWB/CCM → 曝光基準
+   └─ 通過：ΔE&lt;3、四角亮度差&lt;5%
+
+M4 動態（unit-10）
+   ├─ AE 收斂 + anti-flicker
+   └─ 通過：無 banding、收斂 &lt; 15 幀
+
+M5 美化（unit-13/14）
+   ├─ DPC → NR → Sharpen 取捨
+   └─ 通過：SNR≥30dB、無 halo、裂痕可辨
+
+M6 回歸（unit-14/15/16）
+   ├─ 室內/日光/混合光源各 100 張
+   ├─ 瑕疵偵測率 &gt; 99%
+   └─ 通過：回歸全過
+
+M7 交付
+   └─ 通過：tuning log + 參數 + SOP 進 repo
+
+每階段門檻都要量化（SNR、ΔE、偵測率、亮度差 %）。</pre></div>
+  <div class="callout"><strong>專案要點：</strong>這是全站課程的「總整專案」。它證明一件事：調校的成功來自「順序 + 紀律 + 量化門檻」，而不是某一招。每階段有明確門檻，才能重現與追蹤。</div>
+
+  <h2>14.18 量測 / 驗證 SOP：完整調校工作流</h2>
+  <div class="demo-block"><div class="demo-label">工作流 SOP（Step 1–8）</div><pre>Step 1 感測器 init（unit-06 SOP）
+Step 2 黑位（unit-08 SOP）
+Step 3 LSC（unit-12 SOP）
+Step 4 AWB/CCM（unit-11 SOP）
+Step 5 曝光基準（unit-10 SOP）
+Step 6 AE 動態 + anti-flicker
+Step 7 DPC/NR/Sharpen
+Step 8 回歸 + tuning log
+
+每步記錄（unit-14.7 範本）：
+  日期/場景/改動/原因/結果(量化)/回歸 ✓✗/附圖
+
+原則：
+  一次只改一個參數
+  統一場景比較
+  用 RAW 或關 NR 路徑量測</pre></div>
+
+  <h2>14.19 平台間對照：調校工作流與清晰度</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>調校工作流</td><td>NVIDIA 自動化為主 + 微調</td><td>libcamera tuning 檔</td><td>register 直改</td><td>NVIDIA 自動化為主</td></tr>
+  <tr><td>Sharpen</td><td>✅ 內部</td><td>✅ 可調</td><td>⚠️ 感測器內建</td><td>✅ 內部</td></tr>
+  <tr><td>HDR</td><td>✅✅ 多幀 + tone mapping</td><td>✅ 基礎</td><td>⚠️</td><td>✅ 多幀</td></tr>
+  <tr><td>MTF/清晰度工具</td><td>第三方（ISO12233）</td><td>第三方</td><td>第三方</td><td>第三方</td></tr>
+  <tr><td>回歸測試支援</td><td>✅ Holoscan 管線化</td><td>⚠️ 腳本</td><td>⚠️ 腳本</td><td>✅ 腳本</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>調校「工作流的順序與紀律」四平台完全一樣——這正是本課程能跨平台的原因。Thor 的優勢在多幀 HDR 與 Holoscan 管線化回歸，讓「調校」能自動化、可重現。</div>
+
+  <h2>14.20 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能照「黑位→LSC→AWB/CCM→曝光→美化→回歸」順序完成調校。</li>
+  <li>- [ ] 我能用 tuning log 範本記錄每次改動。</li>
+  <li>- [ ] 我能用 ISO12233 量測 MTF 並判斷 sharpen 甜蜜點。</li>
+  <li>- [ ] 我能設計 tone mapping 曲線並驗證亮暗保留。</li>
+  <li>- [ ] 我能判斷「HDR vs 單幀 tone mapping」的適用場景。</li>
+  <li>- [ ] 我能完成多場景回歸並產出量化報告。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

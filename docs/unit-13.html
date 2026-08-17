@@ -242,6 +242,80 @@ SNR 影響：4 e⁻ 佔 full well 10000 的 0.04%（微小但累積）
     <a href="unit-12.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 12 · 鏡頭陰影校正（LSC）</div></a>
     <a class="np-next" href="unit-14.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 14 · 清晰度、動態範圍與調校工作流</div></a>
   </div>
+
+  <h2>13.22 專案級端到端 Worked Example：雜訊預算專案 — 從量測到降噪策略</h2>
+  <p>場景：低光倉庫機器人，目標全天候 SNR ≥ 28 dB。專案目標：量化各 gain 下雜訊，找出增益上限，決定補光與降噪策略。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 暗場量測
+   ├─ 固定條件取 20 張暗場
+   ├─ 算 mean（black level）與 std（read noise）
+   └─ 通過：black level 固定、std 合理
+
+M2 σ vs gain
+   ├─ gain 1/2/4/8 各量 σ
+   └─ 通過：畫出 σ-gain 曲線，找出暴增區間
+
+M3 SNR 預算
+   ├─ 各場景算 SNR（unit-13.9）
+   └─ 通過：知道哪些場景不達標
+
+M4 增益上限
+   ├─ 設 max gain（σ 暴增前）
+   └─ 通過：AE 不超過上限
+
+M5 降噪策略
+   ├─ DPC（缺陷表）→ 空間 NR → 時間 NR
+   ├─ 黑框 RAW 驗證 DPC 壓制 max
+   └─ 通過：NR 後 SNR 達標且細節保留
+
+M6 回歸 + 交付
+   └─ 通過：SNR 預算表 + 增益上限 + NR 參數進 repo
+
+驗證：
+  SNR = 20·log10(signal / σ)
+  黑框 max 值 = DPC 效能指標</pre></div>
+  <div class="callout"><strong>專案要點：</strong>降噪的順序是「先源頭（增益/曝光/補光）→ 再收尾（DPC/NR）」。SNR 預算是量化語言——「補光還是接受雜訊」用數字決定，不靠感覺。</div>
+
+  <h2>13.23 量測 / 驗證 SOP：雜訊與降噪驗證</h2>
+  <div class="demo-block"><div class="demo-label">雜訊 SOP（Step 1–6）</div><pre>Step 1 暗場收集
+   固定曝光/gain/溫度，取 20 張暗場 RAW
+Step 2 統計
+   mean=black level、std=read noise
+Step 3 增益掃描
+   gain 1/2/4/8 各量 σ，畫曲線
+Step 4 SNR 預算
+   各場景算 SNR，比對目標
+Step 5 DPC 驗證
+   黑框 RAW 的 max 值應被壓制
+Step 6 NR 調整
+   空間 NR（細節）vs 時間 NR（殘影）取捨
+
+判讀指標：
+  σ 隨 gain 暴增 → 找出上限
+  固定亮點 → hot pixel / FPN（DPC 處理）
+  殘影 → temporal NR 閾值太低
+  邊緣模糊 → spatial NR 太強</pre></div>
+
+  <h2>13.24 平台間對照：雜訊與降噪</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>NR 引擎</td><td>NVIDIA 空間+時間</td><td>libcamera（可調）</td><td>感測器內建（有限）</td><td>NVIDIA 空間+時間</td></tr>
+  <tr><td>DPC</td><td>✅</td><td>✅</td><td>⚠️</td><td>✅</td></tr>
+  <tr><td>NR 強度控制</td><td>受限（自動化）</td><td>✅ 全可調</td><td>低</td><td>受限</td></tr>
+  <tr><td>時間 NR 殘影控制</td><td>✅ 內部</td><td>✅ 可調 threshold</td><td>⚠️</td><td>✅ 內部</td></tr>
+  <tr><td>高增益行為</td><td>自動調適</td><td>需手動調</td><td>固定</td><td>自動調適</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>「雜訊量測」必須在 RAW 或關 NR 路徑做——NR 會改寫統計。Thor/Orin 的 NR 自動化強；RPi5 能深入調 threshold，但那是「最後 5%」的差異。</div>
+
+  <h2>13.25 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能量測 σ vs gain 曲線並決定增益上限。</li>
+  <li>- [ ] 我能用 SNR 預算比較「補光 vs 拉增益」。</li>
+  <li>- [ ] 我能用暗場多張分離 black level 與 read noise。</li>
+  <li>- [ ] 我能說出 DPC 與 NR 的順序與原因。</li>
+  <li>- [ ] 我能調整空間/時間 NR 並驗證細節與殘影。</li>
+  <li>- [ ] 我能處理長時間運作的 black level 漂移（溫度）。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

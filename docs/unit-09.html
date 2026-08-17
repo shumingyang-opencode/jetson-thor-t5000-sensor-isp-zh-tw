@@ -191,6 +191,75 @@ Thor：分開驗證 CSI/HSB source → 固定 Holoscan source format → 查 ISP
     <a href="unit-08.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 8 · RAW 擷取與資料格式</div></a>
     <a class="np-next" href="unit-10.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 10 · 曝光與自動曝光（AE）</div></a>
   </div>
+
+  <h2>9.16 專案級端到端 Worked Example：跨平台移植專案 — RPi5 調校遷移到 Thor</h2>
+  <p>場景：一顆感測器在 RPi5 已調校完成，現在要遷移到 Thor 量產。專案目標：在不重建演算法的前提下，用相同 SOP 重產 Thor 專用參數，並量化兩平台的差距。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 可移植盤點
+   ├─ 感測器 init 表（可搬）
+   ├─ 曝光/AWB 換算表（可搬）
+   ├─ libcamera JSON tuning（不可搬，需重校）
+   └─ 通過：列出「可搬/重校/不可對映」三類清單
+
+M2 同條件基準
+   ├─ 同感測器、同鏡頭、同光源箱、同 sensor mode
+   ├─ 各平台取 RAW + YUV
+   └─ 通過：RAW histogram 接近（輸入相同）
+
+M3 Thor 重校
+   ├─ 黑位 → LSC → AWB/CCM → NR/Sharpen（unit-14 SOP）
+   └─ 通過：各階段門檻（ΔE、四角亮度差、SNR）
+
+M4 量化對照
+   ├─ 比較兩平台：SNR、ΔE、latency、掉幀
+   └─ 通過：產出對照表 + 差距原因分析
+
+M5 回歸
+   └─ 通過：室內/日光/混合光源回歸全過
+
+M6 交付
+   └─ 通過：Thor 調校包 + 移植 SOP 進 repo</pre></div>
+  <div class="callout"><strong>專案要點：</strong>移植的 90% 成功來自「流程可攜」，不是「參數可攜」。把 RPi5 的校正 SOP 原封不動搬到 Thor 重跑一遍，比試圖把 JSON 轉成 NVIDIA 格式可靠得多。</div>
+
+  <h2>9.17 量測 / 驗證 SOP：跨平台同條件比較</h2>
+  <div class="demo-block"><div class="demo-label">跨平台 SOP（Step 1–6）</div><pre>Step 1 定義條件
+   同感測器/鏡頭/光源/模式/曝光/輸出格式
+Step 2 各平台取樣
+   RAW、YUV、fps、延遲、CPU/GPU 使用率
+Step 3 比對輸入
+   RAW histogram、Bayer、黑位是否一致
+   # 不一致 → 先修輸入，別比 ISP
+Step 4 比對輸出
+   SNR、ΔE、MTF、latency
+Step 5 歸因
+   差異分類：sensor / ISP / 輸出
+Step 6 記錄
+   條件表 + 資料 + 結論進 repo
+
+判讀指標：
+  輸入一致 + 輸出不同 → 平台 ISP 差異
+  輸入就不一致 → 無效比較</pre></div>
+
+  <h2>9.18 平台間對照：調校深層差異</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>調校邏輯位置</td><td>Blackwell ISP + Holoscan</td><td>libcamera IPA（user space）</td><td>感測器韌體</td><td>NVIDIA ISP（libnvivp）</td></tr>
+  <tr><td>可視參數</td><td>~50 + 自動化</td><td>~200（開源）</td><td>~30（sensor only）</td><td>~50 + 自動化</td></tr>
+  <tr><td>ISP latency</td><td>~2–4 ms</td><td>~15 ms</td><td>~5 ms</td><td>~2–3 ms</td></tr>
+  <tr><td>調校交付格式</td><td>NVIDIA 工具 + Holoscan 設定</td><td>JSON tuning 檔</td><td>register init 表</td><td>NVIDIA 工具</td></tr>
+  <tr><td>自動化程度</td><td>很高</td><td>中</td><td>低</td><td>高</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>Thor/Orin 的優勢是「自動化 + 低延遲」，代價是「深層參數不可視」。若專案需要自訂色彩曲線或特殊 NR，RPi5 的開源 ISP 反而更靈活——但效能與規模輸一截。</div>
+
+  <h2>9.19 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能說出四平台的調校邏輯分別住在哪一層。</li>
+  <li>- [ ] 我能完成一次跨平台同條件比較並歸因差異。</li>
+  <li>- [ ] 我能列出「可搬 / 重校 / 不可對映」三類參數。</li>
+  <li>- [ ] 我能說出 Thor 與 Orin 調校的共通點與差異。</li>
+  <li>- [ ] 我能比較四平台的 ISP latency 與原因。</li>
+  <li>- [ ] 我能評估「RPi5 調校搬到 Thor」的風險。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

@@ -184,6 +184,75 @@ CPU 使用率        65%       25%         12%         8%
     <a href="unit-14.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 14 · 清晰度、動態範圍與調校工作流</div></a>
     <a class="np-next" href="unit-16.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 16 · 多感測器與實作案例</div></a>
   </div>
+
+  <h2>15.15 專案級端到端 Worked Example：平台選擇專案 — 用決策矩陣選出最佳平台</h2>
+  <p>場景：新專案要選平台（Thor/RPi5/Orange Pi/Orin Nano）。專案目標：用量化需求 + 加權決策矩陣選出平台，並用最小可行實驗驗證。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 需求量化
+   ├─ 感測器數、解析度、fps、延遲預算
+   ├─ 色彩/SNR 要求、成本、開發時間
+   └─ 通過：需求表（每項可量測）
+
+M2 加權矩陣
+   ├─ 每項權重 × 每平台評分
+   └─ 通過：產出總分排行
+
+M3 候選平台 POC
+   ├─ 對前 2 名跑最小實驗（取流 + RAW 分析）
+   └─ 通過：實測數據 vs 需求表
+
+M4 風險評估
+   ├─ 感測器驅動支援度、調校工具、交付格式
+   └─ 通過：風險清單
+
+M5 決策
+   └─ 通過：選定平台 + 決策文件進 repo
+
+範例加權：
+  多感測器規模 0.30  latency 0.20  SNR 0.20
+  色彩 0.15  成本 0.10  開發時間 0.05
+  → Thor 在規模/latency 高分 → 適合機器人融合</pre></div>
+  <div class="callout"><strong>專案要點：</strong>選平台最忌「感覺」。量化需求 + 加權矩陣 + 實測 POC，三個證據都指向同一結論時才下決定。Thor 勝在規模與延遲，但「需要多少成本/工具鏈」也是權重的一部分。</div>
+
+  <h2>15.16 量測 / 驗證 SOP：平台評估與比較</h2>
+  <div class="demo-block"><div class="demo-label">評估 SOP（Step 1–6）</div><pre>Step 1 需求清單
+   感測器/解析度/fps/延遲/SNR/色彩/成本
+Step 2 各平台規格盤點
+   ISP 形態、路徑、工具、生態
+Step 3 最小 POC
+   每平台：取流 + RAW + 基本調校
+Step 4 量化比較
+   SNR、ΔE、latency、fps、CPU/GPU
+Step 5 風險評估
+   驅動支援、工具鏈、交付格式、長期維護
+Step 6 決策 + 記錄
+   矩陣分數 + 實測數據 + 決策理由
+
+判讀指標：
+  實測 vs 規格不符 → 以實測為準
+  分數接近 → 比長期維護與生態，不比峰值</pre></div>
+
+  <h2>15.17 平台間對照：定位與生態總覽</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>定位</td><td>次世代物理 AI</td><td>學習/開源</td><td>底層 DIY</td><td>工業量產</td></tr>
+  <tr><td>多感測器規模</td><td>6+（HSB 可擴）</td><td>2</td><td>1–2</td><td>4–6</td></tr>
+  <tr><td>ISP 可調性</td><td>中（自動化強）</td><td>高（開源）</td><td>低</td><td>中</td></tr>
+  <tr><td>社群/文件</td><td>NVIDIA 官方 + 論壇</td><td>極大社群</td><td>小社群</td><td>NVIDIA 官方</td></tr>
+  <tr><td>成本取向</td><td>高（效能頂）</td><td>低</td><td>極低</td><td>中高</td></tr>
+  <tr><td>最佳場景</td><td>機器人多感測器融合</td><td>教學/原型</td><td>低成本 DIY</td><td>工業視覺</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>沒有「最好平台」，只有「最適合需求」。Thor 在「規模 + 延遲 + 自動化」三項全面領先，但成本與工具鏈要求也最高——這是取捨，不是缺點。</div>
+
+  <h2>15.18 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能建立四平台的功能差異對照表。</li>
+  <li>- [ ] 我能用加權決策矩陣選平台。</li>
+  <li>- [ ] 我能設計最小 POC 並量化比較。</li>
+  <li>- [ ] 我能說出 Thor 選型的三個適用場景。</li>
+  <li>- [ ] 我能評估「調校可攜性」的風險。</li>
+  <li>- [ ] 我能依專案需求（規模/延遲/成本）給出平台建議。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

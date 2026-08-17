@@ -153,6 +153,88 @@ Holoscan 配置：
     <a href="index.html"><div class="np-label">← 上一層</div><div class="np-name">單元教學目錄</div></a>
     <a class="np-next" href="unit-02.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 2 · 影像感測器基礎</div></a>
   </div>
+
+  <h2>1.13 專案級端到端 Worked Example：完整感測器 Bring-up 專案 — 從 DT overlay 到第一張圖</h2>
+  <p>這是一個整合全站 16 個單元的旗艦專案。目標：在 Thor T5000 上，把一顆全新的 OV9281 從「沒有驅動」帶到「Holoscan 管線輸出第一張圖」，並完成基礎調校。以里程碑（M0–M6）組織，每個里程碑都有通過標準與對應單元。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃（M0–M6）</div><pre>M0 環境與目標定義（unit-01）
+   ├─ 選定路徑：CSI（實驗室原型）
+   ├─ 選定軟體堆疊：V4L2 + Argus → Holoscan
+   └─ 通過：頻寬估算 ≤ 50% 可用、堆疊清單齊全
+
+M1 硬體與電源（unit-06）
+   ├─ 供電（AVDD/DVDD）、MCLK 24MHz、RESET GPIO
+   └─ 通過：示波器量測上電時序符合 datasheet
+
+M2 驅動與 DTB overlay（unit-04）
+   ├─ 建立 ov9281 的 DT overlay（compatible / reg / clocks / reset-gpios）
+   ├─ 重建並載入 overlay
+   └─ 通過：dmesg 看到 probe 成功、讀到 ID 0x92
+
+M3 取流（unit-05）
+   ├─ v4l2-ctl 取 1 幀 NV12 + 1 幀 RAW
+   └─ 通過：檔案大小符合、media graph link 全啟用
+
+M4 資料驗證（unit-08）
+   ├─ 解包 RAW10、驗證 Bayer order、黑位
+   └─ 通過：Gr≈Gb、黑位=固定常數
+
+M5 基礎調校（unit-10~14）
+   ├─ AE 收斂、AWB 灰卡、LSC 網格、NR/Sharpen
+   └─ 通過：SNR≥30dB、ΔE&lt;3、四角亮度差&lt;5%
+
+M6 回歸與交付（unit-15/16）
+   ├─ 多場景回歸、寫 SOP、進 repo
+   └─ 通過：回歸全過、文件齊全</pre></div>
+  <div class="callout"><strong>專案管理重點：</strong>每個里程碑有「明確通過標準」才進下一步。M2 的 dmesg probe 成功不代表 M3 能取流——中間隔著 CSI 設定與格式匹配。這個專案範本可複製到任何新感測器（換型號只換 M1/M2 的參數）。</div>
+
+  <h2>1.14 量測 / 驗證 SOP：平台相機子系統總驗證</h2>
+  <p>目的：在「開始任何影像品質工作之前」，先證明平台相機子系統健康。此 SOP 是 M0–M3 的正式化版本，適合每次環境變動後重跑。</p>
+  <div class="demo-block"><div class="demo-label">總驗證 SOP（Step 1–8）</div><pre>Step 1  盤點介面
+   lspci | grep -i camera / ip link show        # CSI/HSB 路徑存在
+Step 2  確認工具鏈
+   which v4l2-ctl media-ctl i2c-tools holoscan   # 皆可用
+Step 3  掃描感測器
+   i2cdetect -y &lt;bus&gt;                            # 0x36 出現
+Step 4  讀 ID
+   i2cget -y &lt;bus&gt; 0x36 0x300a                  # 0x92
+Step 5  media graph
+   media-ctl -p -d /dev/media0                   # 感測器→CSI→VI→video 全啟用
+Step 6  取流
+   v4l2-ctl -d /dev/video0 --stream-mmap=3 --stream-count=1 --stream-to=f.nv12
+Step 7  檔案大小驗證
+   ls -l f.nv12                                  # 1280×800 NV12 = 1,536,000 B
+Step 8  記錄
+   tee -a bringup_log.txt                        # 時間戳 + 全部輸出
+
+判讀指標：
+  ✅ 全部通過 → 進入調校（unit-10 起）
+  ⚠️ Step 3–4 失敗 → unit-03/06
+  ⚠️ Step 5 失敗   → unit-04（DTB/驅動）
+  ⚠️ Step 6–7 失敗 → unit-05（取流/格式）</pre></div>
+
+  <h2>1.15 平台間對照：相機生態總覽</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>感測器路徑</td><td>CSI-2（16 lanes）+ HSB（25GbE）</td><td>CSI-2（2×4 lanes）</td><td>CSI-2（4 lanes）</td><td>CSI-2 / GMSL</td></tr>
+  <tr><td>軟體堆疊</td><td>V4L2/Argus + Holoscan</td><td>libcamera + V4L2</td><td>V4L2（感測器內建 ISP）</td><td>V4L2/Argus</td></tr>
+  <tr><td>多感測器規模</td><td>6+（16 lanes 全用）</td><td>2（兩組 CSI port）</td><td>1–2</td><td>4–6（依型號）</td></tr>
+  <tr><td>遠距感測器</td><td>✅ HSB（數十米）</td><td>❌</td><td>❌</td><td>⚠️ GMSL（串行化）</td></tr>
+  <tr><td>GPU 直連資料</td><td>✅ Blackwell + GPUDirect</td><td>❌（CPU 導向）</td><td>❌</td><td>✅ Ampere</td></tr>
+  <tr><td>典型定位</td><td>次世代物理 AI</td><td>學習/原型</td><td>底層 DIY</td><td>工業量產</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>同樣是「接相機」，Thor 的差異在「規模」與「路徑」——16 lanes 總容量 + HSB 遠距。RPi5 的 2 路 CSI 對學習足夠，但對 6 鏡頭融合就是物理上限。</div>
+
+  <h2>1.16 互動式檢核清單</h2>
+  <p>完成本單元後，逐項勾選（<code>- [ ]</code>）並實際執行過：</p>
+  <ul>
+  <li>- [ ] 我能在 Thor 上列出三種感測器路徑，並說出各自適用場景。</li>
+  <li>- [ ] 我能畫出「感測器 → offload engine → GPU/ISP」資料流，並標出 HSB 與 CSI 的差異點。</li>
+  <li>- [ ] 我能完成一次 16 lanes 的頻寬估算，並判斷某顆感測器該配幾條 lane。</li>
+  <li>- [ ] 我能說出 Jetson 堆疊（V4L2/Argus）與 Holoscan 的分工邊界。</li>
+  <li>- [ ] 我能列出 Thor 相機子系統總驗證 SOP 的 8 個步驟。</li>
+  <li>- [ ] 我能說明 Thor 與 RPi5 在「多感測器規模」上的差異原因。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

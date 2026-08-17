@@ -208,6 +208,79 @@ gB = 510 / 400 = 1.275
     <a href="unit-10.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 10 · 曝光與自動曝光（AE）</div></a>
     <a class="np-next" href="unit-12.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 12 · 鏡頭陰影校正（LSC）</div></a>
   </div>
+
+  <h2>11.22 專案級端到端 Worked Example：色彩校正專案 — 灰卡 AWB 到色卡 CCM</h2>
+  <p>場景：食品品質檢測專案要求 ΔE &lt; 3。專案目標：建立「灰卡→AWB、色卡→CCM」的完整色彩校正流程並量化驗證。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 中性化感測器
+   ├─ 固定光源（D65 光源箱）
+   ├─ 手動設 AWB gains 讓灰卡 R=G=B
+   └─ 通過：灰卡四通道比例一致
+
+M2 多色溫建表
+   ├─ 3000K / 5000K / 6500K 各拍灰卡
+   ├─ 各產一組 AWB gains
+   └─ 通過：色溫-gains 對照表
+
+M3 CCM 校正
+   ├─ 拍 Macbeth 色卡
+   ├─ 量測 24 色塊 ΔE
+   └─ 通過：平均 ΔE &lt; 3
+
+M4 色溫分段驗證
+   ├─ 每色溫段各量一次 ΔE
+   └─ 通過：所有段 ΔE &lt; 5
+
+M5 混合色溫
+   ├─ 定義 ROI 策略（unit-11.18）
+   └─ 通過：主區域 ΔE &lt; 3
+
+M6 回歸 + 交付
+   └─ 通過：色溫-CCM 表進 repo + 重跑 SOP 文件
+
+驗證：
+  ΔE = 用 Lab 色彩空間比較色卡實際值 vs 標準值</pre></div>
+  <div class="callout"><strong>專案要點：</strong>色彩校正的順序不可逆：先中性化（AWB）→ 再色彩空間映射（CCM）。AWB 未收斂就量 CCM，誤差會混入照明估計。</div>
+
+  <h2>11.23 量測 / 驗證 SOP：色彩校正與驗證</h2>
+  <div class="demo-block"><div class="demo-label">色彩 SOP（Step 1–6）</div><pre>Step 1 固定光源與曝光
+   光源箱（D65）+ 固定曝光 + 關自動
+Step 2 灰卡 AWB
+   拍灰卡 → 讀 RAW 四通道 → 算 gains → 套用
+Step 3 驗證中性
+   重拍灰卡 → R≈G≈B
+Step 4 色卡 CCM
+   拍 Macbeth → 量 24 色塊 → 建 CCM
+Step 5 ΔE 驗證
+   套 CCM 後重拍 → 算 ΔE（目標 &lt; 3）
+Step 6 多色溫 + 回歸
+   3000/5000/6500K 各驗一次
+
+判讀指標：
+  RAW 四通道比例已失衡 → sensor gains / 黑位 / Bayer
+  灰卡正常但色卡錯 → CCM
+  只混合光源錯 → ROI 策略</pre></div>
+
+  <h2>11.24 平台間對照：AWB 與色彩</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>AWB 控制</td><td>Argus AWB（自動/手動色溫）</td><td>ColourGains</td><td>red/blue_balance</td><td>Argus AWB</td></tr>
+  <tr><td>CCM 可調性</td><td>受限（內部 tuning）</td><td>✅ tuning JSON</td><td>❌ 感測器內建</td><td>受限</td></tr>
+  <tr><td>色溫分段</td><td>✅ 內部自動</td><td>✅ 可設定</td><td>⚠️</td><td>✅ 內部自動</td></tr>
+  <tr><td>ROI-based AWB</td><td>✅</td><td>✅（部分）</td><td>❌</td><td>✅</td></tr>
+  <tr><td>色彩調校深度</td><td>中（自動化協助）</td><td>高（全開源）</td><td>低</td><td>中</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>「感測器先中性，交給平台色彩收尾」的分工四平台一致。RPi5 能深入自訂 CCM 曲線；Thor/Orin 靠自動化與內部色溫分段，深度色彩自訂需要 NVIDIA 工具。</div>
+
+  <h2>11.25 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能用灰卡算出 AWB gains（R/G/B 比例→增益）。</li>
+  <li>- [ ] 我能說出 AWB 與 CCM 的順序與不可交換性。</li>
+  <li>- [ ] 我能用 Macbeth 色卡量測 ΔE。</li>
+  <li>- [ ] 我能判斷「偏色來自 AWB 還是 CCM」。</li>
+  <li>- [ ] 我能處理混合色溫（ROI 策略）。</li>
+  <li>- [ ] 我能避免「拿白牆當灰卡」等常見陷阱。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

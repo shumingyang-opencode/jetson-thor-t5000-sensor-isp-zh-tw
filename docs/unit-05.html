@@ -168,6 +168,79 @@ cat /sys/kernel/debug/v4l2/video*/queue_status
     <a href="unit-04.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 4 · 平台相機框架與驅動</div></a>
     <a class="np-next" href="unit-06.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 6 · Sensor Bring-up 與除錯</div></a>
   </div>
+
+  <h2>5.19 專案級端到端 Worked Example：第一張圖專案 — 從取流到可分析的檔案</h2>
+  <p>場景：新開發板到手，目標在 30 分鐘內「取到第一張圖」並確認格式正確，為後續 RAW 分析打基礎。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 環境確認（2 min）
+   ├─ media graph 完整（unit-04）
+   └─ 通過：四層 node 全啟用
+
+M2 第一次取流（5 min）
+   ├─ v4l2-ctl --stream-mmap=3 --stream-count=1 --stream-to=first.nv12
+   └─ 通過：檔案大小 = W×H×1.5
+
+M3 顯示檢查（5 min）
+   ├─ ffplay / 轉 PNG 目視
+   └─ 通過：畫面非全黑/全綠、無明顯撕裂
+
+M4 格式清單（5 min）
+   ├─ v4l2-ctl --list-formats-ext
+   └─ 通過：記錄 fourcc 與解析度組合
+
+M5 RAW 取樣（5 min）
+   ├─ 以 SRGGB10 取 1 幀
+   └─ 通過：大小 = W×H×10/8
+
+M6 收尾（8 min）
+   └─ 通過：三份檔案（NV12/RAW/格式清單）進 repo
+
+驗證命令：
+  ls -l first.nv12
+  # 1280×800 NV12 → 1,536,000 B；SRGGB10 → 1,280,000 B</pre></div>
+  <div class="callout"><strong>專案要點：</strong>「第一張圖」不是出圖就結束——必須同時拿到 NV12（看畫質）、RAW（分析用）、格式清單（記錄能力）。三份都有才叫「第一張圖專案完成」。</div>
+
+  <h2>5.20 量測 / 驗證 SOP：取流功能驗證</h2>
+  <div class="demo-block"><div class="demo-label">取流 SOP（Step 1–6）</div><pre>Step 1 格式查詢
+   v4l2-ctl -d /dev/video0 --list-formats-ext
+Step 2 設定格式
+   v4l2-ctl -d /dev/video0 --set-fmt-video=width=1280,height=800,pixelformat=NV12
+Step 3 回讀確認
+   v4l2-ctl -d /dev/video0 --get-fmt-video
+   # 確認實際套用的格式（可能 fallback）
+Step 4 取流
+   v4l2-ctl -d /dev/video0 --stream-mmap=3 --stream-count=1 --stream-to=f.nv12
+Step 5 檔案驗證
+   ls -l f.nv12
+   # NV12: W×H×1.5；RAW10: W×H×10/8
+Step 6 連續性測試
+   v4l2-ctl -d /dev/video0 --stream-mmap=3 --stream-count=300 --stream-to=f2.nv12
+   # 300 幀無 timeout
+
+判讀指標：
+  檔案大小不符 → format fallback（回 Step 2 改）
+  timeout/掉幀 → buffer 深度或頻寬</pre></div>
+
+  <h2>5.21 平台間對照：取流工具與流程</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>標準取流</td><td>v4l2-ctl / argus_camera</td><td>libcamera-still / rpicam</td><td>v4l2-ctl</td><td>v4l2-ctl / argus_camera</td></tr>
+  <tr><td>RAW 取樣</td><td>v4l2-ctl + Holoscan</td><td>rpicam --raw</td><td>v4l2-ctl</td><td>argus raw</td></tr>
+  <tr><td>連續壓力測試</td><td>--stream-count</td><td>--timelapse / burst</td><td>--stream-count</td><td>--stream-count</td></tr>
+  <tr><td>GPU 路徑取流</td><td>✅ Holoscan（DMABUF）</td><td>❌</td><td>❌</td><td>⚠️ Argus 內部</td></tr>
+  <tr><td>HSB 網路取流</td><td>✅ 支援</td><td>❌</td><td>❌</td><td>❌</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>取流的「概念與狀態機」四平台相同（S_FMT→REQBUFS→QBUF→STREAMON→DQ 迴圈）。Thor 的差異是多了 Holoscan/DMABUF 這條 GPU 直連路徑。</div>
+
+  <h2>5.22 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能用 v4l2-ctl 完成「查格式→設格式→取流→驗檔」完整流程。</li>
+  <li>- [ ] 我能用檔案大小驗證 NV12 與 RAW10 格式正確。</li>
+  <li>- [ ] 我能說出 V4L2 取流的五個狀態與常見失敗點。</li>
+  <li>- [ ] 我能比較 mmap 與 DMABUF 的適用場景。</li>
+  <li>- [ ] 我能用 argus_camera 對照 V4L2 node。</li>
+  <li>- [ ] 我能完成 300 幀連續取流的壓力測試。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

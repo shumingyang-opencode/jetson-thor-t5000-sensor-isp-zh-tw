@@ -236,6 +236,77 @@ Gate E：融合輸出
     <a href="unit-15.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 15 · 四平台影像調校功能比較</div></a>
     <a class="np-next" href="index.html"><div class="np-label">課程完成 →</div><div class="np-name">回首頁 · 單元教學目錄</div></a>
   </div>
+
+  <h2>16.20 專案級端到端 Worked Example：六感測器融合專案 — 從 bring-up 到融合輸出</h2>
+  <p>場景：物流分揀系統，6 顆 OV5640（5MP RAW12 30fps）經 HSB 接入 Thor，Holoscan 即時 3D 重建與條碼讀取。這是全站課程的「畢業專案」。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃（Gate A–E）</div><pre>Gate A 各自 bring-up
+   6 顆逐一：I2C、ID、取 RAW、無 CSI/HSB error
+   ✅ 通過：6 顆全獨立出圖
+
+Gate B 各自畫質
+   黑位/Bayer/LSC/AWB/SNR 各過門檻
+   每顆 LSC 獨立校正（不同鏡頭角度）
+   ✅ 通過：6 顆全達標
+
+Gate C 同步
+   frame counter 無跳號、曝光 timestamp 差 ≤ 0.5ms
+   FSIN 或 PTP 硬體同步
+   ✅ 通過：同步精度達標
+
+Gate D 頻寬 + 長跑
+   Σ bitrate + overhead &lt; 17.5 Gbps
+   2 小時無 drop、queue 穩定、GPU 溫度正常
+   ✅ 通過：長跑穩定
+
+Gate E 融合輸出
+   3D 重建精度 &lt; 1mm（標準方塊）
+   條碼讀取率 &gt; 99.5%（100 包裹測試）
+   ✅ 通過：業務指標達標
+
+輸出：6 顆的 Gate A–E 表格 + 原始資料 + SOP 進 repo</pre></div>
+  <div class="callout"><strong>專案要點：</strong>多感測器專案的驗收是「Gate 制」——每道 Gate 有獨立門檻，未過不進下一關。Gate A 通過不代表融合成功；Gate E 才是終點。這個架構適用於任何多感測器專案。</div>
+
+  <h2>16.21 量測 / 驗證 SOP：多感測器系統驗收</h2>
+  <div class="demo-block"><div class="demo-label">多感測器 SOP（Step 1–6）</div><pre>Step 1 逐顆 bring-up（unit-06 SOP × N）
+   每顆：I2C/ID/取流/RAW
+Step 2 逐顆畫質（unit-14 SOP × N）
+   黑位/LSC/AWB/SNR
+Step 3 同步驗證
+   frame counter 連續性 + timestamp 對齊
+   FSIN 或 PTP（unit-16.7）
+Step 4 頻寬驗算
+   Σ (W×H×bit×fps) + overhead &lt; 安全上限（70%）
+Step 5 長跑測試
+   2 小時：掉幀數、queue 深度、GPU/溫度
+Step 6 融合輸出驗收
+   業務指標（重建精度、讀取率、偵測率）
+
+判讀指標：
+  單顆偶發掉幀 → 該路 buffer/網路
+  同步誤差大 → FSIN/PTP/clock domain
+  queue 成長 → GPU thermal / 處理過重</pre></div>
+
+  <h2>16.22 平台間對照：多感測器與融合</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>多感測器上限</td><td>6+（16 lanes / HSB）</td><td>2（雙 CSI）</td><td>1–2</td><td>4–6</td></tr>
+  <tr><td>HSB 網路感測器</td><td>✅ 25GbE 遠距</td><td>❌</td><td>❌</td><td>❌</td></tr>
+  <tr><td>同步機制</td><td>FSIN + PTP + Holoscan sync</td><td>無（單一相機）</td><td>無</td><td>FSIN</td></tr>
+  <tr><td>融合框架</td><td>✅ Holoscan（GPU 管線）</td><td>⚠️ CPU 腳本</td><td>⚠️</td><td>⚠️ CUDA（自建）</td></tr>
+  <tr><td>多路 buffer 管理</td><td>✅ 每路獨立設定</td><td>⚠️</td><td>⚠️</td><td>✅</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>多感測器是 Thor 的「主場」——HSB 讓感測器數量與距離不受 CSI 限制，Holoscan 提供 GPU 融合框架與同步。RPi5/Orange Pi 在單顆學習上夠用，但「多顆 + 同步 + 融合」是 Thor/Orin 的領域。</div>
+
+  <h2>16.23 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能估算多感測器總頻寬並對照安全上限。</li>
+  <li>- [ ] 我能建立每顆感測器的 Gate A–E 驗收表。</li>
+  <li>- [ ] 我能用 FSIN / PTP 驗證多路同步精度。</li>
+  <li>- [ ] 我能管理多路 buffer pool 與獨立 unpack 設定。</li>
+  <li>- [ ] 我能完成 2 小時長跑並診斷掉幀。</li>
+  <li>- [ ] 我能寫出可重複執行的多感測器 bring-up + 調校 SOP。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

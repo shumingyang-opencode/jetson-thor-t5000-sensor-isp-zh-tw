@@ -171,6 +171,74 @@ i2ctransfer -y &lt;bus&gt; w21@0x3c 0x30 0x0a ... <span class="hl-c"># 21 bytes 
     <a href="unit-02.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 2 · 影像感測器基礎</div></a>
     <a class="np-next" href="unit-04.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 4 · 平台相機框架與驅動</div></a>
   </div>
+
+  <h2>3.19 專案級端到端 Worked Example：多顆感測器 I2C 拓撲與 init 管理專案</h2>
+  <p>場景：Thor 上要接 6 顆 OV9281。每顆有自己的 I2C bus（HSB 橋接）或共享 bus（CSI）。專案目標：建立一個「可重現、可平行初始化」的多顆 I2C 基礎架構。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 拓撲盤點
+   ├─ 列出每顆感測器的 bus 編號、位址、橋接通道
+   └─ 通過：i2cdetect 6 顆全出現、位址無衝突
+
+M2 單顆 init 驗證
+   ├─ 對 1 顆跑完整 init table
+   ├─ 回讀關鍵 register（ID、PLL、mode）
+   └─ 通過：回讀值全符合
+
+M3 平行初始化
+   ├─ 6 顆平行跑 init（背景程序）
+   ├─ 監控橋接佇列深度
+   └─ 通過：init 完成 &lt; 20 ms、無 NAK
+
+M4 位址衝突測試
+   ├─ 故意將兩顆設為同位址，觀察現象
+   └─ 通過：能識別衝突並用 ID pin 錯開
+
+M5 產出 init 管理工具
+   └─ 通過：repo 內有 per-sensor init 表 + 驗證腳本</pre></div>
+  <div class="callout"><strong>專案要點：</strong>多顆感測器的 I2C 問題 90% 是「拓撲沒畫清楚」。先把每顆的 bus/位址/橋接通道畫成表格，所有除錯才有依據。</div>
+
+  <h2>3.20 量測 / 驗證 SOP：I2C 通訊健康檢查</h2>
+  <div class="demo-block"><div class="demo-label">I2C SOP（Step 1–7）</div><pre>Step 1 列出 bus
+   i2cdetect -l
+Step 2 掃描
+   i2cdetect -y &lt;bus&gt;                  # 感測器位址出現
+Step 3 讀 ID（單一 transaction）
+   i2ctransfer -y &lt;bus&gt; w2@0x36 0x30 0x0a r1
+Step 4 寫入→回讀驗證
+   i2cset -y &lt;bus&gt; 0x36 0x3501 0x03
+   i2cget -y &lt;bus&gt; 0x36 0x3501          # 回 0x03
+Step 5 時序檢查（HSB）
+   密集寫入間插入 1ms，觀察 NAK 是否消失
+Step 6 錯誤計數
+   dmesg | grep -i i2c                   # 無 i2c transfer error
+Step 7 記錄
+   位址、bus、回讀值、錯誤計數
+
+判讀指標：
+  0xFF 全回 → 位址/上拉/供電問題
+  0x00 全回 → RESET 未釋放 / clock 未起
+  偶發 NAK → 佇列滿 / jitter / 線材</pre></div>
+
+  <h2>3.21 平台間對照：I2C 介面與工具</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>I2C bus 數量</td><td>多（CSI 各埠 + HSB 橋接）</td><td>多（CSI 專用 + GPIO 擴充）</td><td>少</td><td>多（CSI 各埠）</td></tr>
+  <tr><td>I2C 橋接（遠距）</td><td>✅ HSB 橋接</td><td>❌（本地）</td><td>❌</td><td>⚠️ GMSL 串行控制</td></tr>
+  <tr><td>工具</td><td>i2c-tools / i2ctransfer</td><td>i2c-tools</td><td>i2c-tools</td><td>i2c-tools</td></tr>
+  <tr><td>7-bit 位址慣例</td><td>0x36（7-bit）</td><td>0x36</td><td>0x3c（部分模組）</td><td>0x36</td></tr>
+  <tr><td>HSB 下 I2C 延遲</td><td>~50 µs/筆</td><td>—</td><td>—</td><td>—</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>I2C 是「同一顆感測器、同一組 register」最有力的跨平台論點——讀 0x300A 在四平台只是 <code>i2ctransfer</code> 的 bus 編號不同。學會位元層，四平台通吃。</div>
+
+  <h2>3.22 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能用 i2ctransfer 讀感測器 ID（單一 transaction）。</li>
+  <li>- [ ] 我能把 16-bit register 位址拆成高低位元組寫入並回讀驗證。</li>
+  <li>- [ ] 我能區分「0xFF 全回」與「0x00 全回」的意義。</li>
+  <li>- [ ] 我能說出 HSB 橋接下 I2C 的封包化與佇列深度限制。</li>
+  <li>- [ ] 我能管理多顆感測器的 bus/位址拓撲並避免衝突。</li>
+  <li>- [ ] 我能用批次寫入策略降低 HSB 的 I2C 往返延遲。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

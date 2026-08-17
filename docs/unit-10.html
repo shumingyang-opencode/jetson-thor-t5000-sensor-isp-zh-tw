@@ -216,6 +216,78 @@ banding（條紋）：
     <a href="unit-09.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 9 · 各平台 ISP 架構差異</div></a>
     <a class="np-next" href="unit-11.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 11 · 白平衡與色彩（AWB/CCM）</div></a>
   </div>
+
+  <h2>10.22 專案級端到端 Worked Example：AE 調校專案 — 從收斂到抗閃爍</h2>
+  <p>場景：Thor 上的 SLAM 機器人，60 fps、會進出不同亮度環境（倉庫 / 戶外）、且常在日光燈下運作。專案目標：AE 在各種場景收斂快、無 banding、曝光不超過 motion blur 上限。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 曝光計算基礎
+   ├─ 算出 line time、最大曝光行數（unit-10.14）
+   └─ 通過：requested = applied（回讀一致）
+
+M2 收斂測試
+   ├─ 場景快速切換（亮↔暗），觀察 AE 收斂幀數
+   └─ 通過：&lt; 15 幀收斂、無 overshoot 跳動
+
+M3 上限診斷
+   ├─ 低光：確認曝光/增益誰先到上限
+   └─ 通過：知道卡在哪、知道該補光或降 fps
+
+M4 anti-flicker
+   ├─ 日光燈下測 50/60Hz banding
+   ├─ 設定曝光為市電週期整數倍
+   └─ 通過：無水平亮暗帶
+
+M5 ROI 策略
+   ├─ SLAM 場景定義 AE ROI
+   └─ 通過：主體（前景）曝光優先
+
+M6 回歸
+   └─ 通過：亮/暗/混合光源各場景全過
+
+驗證：
+  v4l2-ctl -d /dev/v4l-subdev0 -C exposure,gain
+  # 比較 requested 與 applied</pre></div>
+  <div class="callout"><strong>專案要點：</strong>AE 調校不是「調一個目標值」而是「驗證三個閉迴路」：收斂速度、上限行為、抗閃爍。三個都驗過，AE 才算完成。</div>
+
+  <h2>10.23 量測 / 驗證 SOP：曝光與 AE 驗證</h2>
+  <div class="demo-block"><div class="demo-label">曝光 SOP（Step 1–6）</div><pre>Step 1 讀目前值
+   v4l2-ctl -d /dev/v4l-subdev0 -C exposure,gain
+Step 2 手動設定並回讀
+   設定曝光 → 回讀確認 applied 一致
+Step 3 單位換算驗證
+   曝光行數 × line time = 真實時間
+Step 4 收斂測試
+   切換場景亮度，數 AE 收斂幀數
+Step 5 banding 測試
+   日光燈下調整曝光為 50/60Hz 整數倍
+Step 6 上限測試
+   低光下找出「曝光 or 增益先到上限」
+
+判讀指標：
+  requested ≠ applied → mode 上限 / 單位換算錯
+  收斂 &gt; 30 幀 → 調 reaction speed
+  banding 存在 → 曝光非市電週期整數倍</pre></div>
+
+  <h2>10.24 平台間對照：曝光控制</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>控制介面</td><td>SensorMode exp_time / V4L2</td><td>ExposureTime</td><td>exposure（V4L2 ctrl）</td><td>SensorMode exp_time</td></tr>
+  <tr><td>AE 引擎</td><td>NVIDIA 自動化</td><td>libcamera IPA</td><td>感測器內建</td><td>NVIDIA 自動化</td></tr>
+  <tr><td>anti-flicker</td><td>✅ 支援</td><td>✅ 支援</td><td>⚠️ 少</td><td>✅ 支援</td></tr>
+  <tr><td>AE ROI</td><td>✅ 多區域統計</td><td>✅ libcamera</td><td>⚠️</td><td>✅</td></tr>
+  <tr><td>曝光單位</td><td>µs（Argus）→ 行數（register）</td><td>µs</td><td>行數或 µs（依驅動）</td><td>µs（Argus）→ 行數</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>「先快門→類比增益→數位增益」的順序鐵則四平台通用。Thor/Orin 的 AE 最自動化、ROI 最完整；Orange Pi 的 AE 能力最受限。</div>
+
+  <h2>10.25 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能換算曝光行數與真實時間（line time）。</li>
+  <li>- [ ] 我能比較 requested 與 applied 並診斷差異原因。</li>
+  <li>- [ ] 我能用 SNR 判斷「該補光還是拉增益」。</li>
+  <li>- [ ] 我能設定 anti-flicker 消除市電 banding。</li>
+  <li>- [ ] 我能設計 AE ROI 並驗證主體曝光。</li>
+  <li>- [ ] 我能由 motion blur 需求反推曝光上限。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

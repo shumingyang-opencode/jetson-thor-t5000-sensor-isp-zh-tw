@@ -155,6 +155,76 @@ SensorSourceOp（Holoscan）→ ISP operator → CUDA operator
     <a href="unit-03.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 3 · 感測器通訊介面</div></a>
     <a class="np-next" href="unit-05.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 5 · 第一個鏡頭跑起來</div></a>
   </div>
+
+  <h2>4.13 專案級端到端 Worked Example：框架建立專案 — 從 DTB overlay 到 Holoscan 管線</h2>
+  <p>場景：團隊要在 Thor 上建立「一個可切換路徑」的相機框架：同一顆感測器能在 CSI（實驗室）與 HSB（量產）間切換，驅動與上層框架共用。</p>
+  <div class="demo-block"><div class="demo-label">里程碑規劃</div><pre>M1 DTB overlay（CSI 路徑）
+   ├─ 建立 ov9281_csi.dtso（compatible/reg/clocks/reset-gpios）
+   ├─ 編譯並載入
+   └─ 通過：dmesg probe 成功、media graph 出現 subdev
+
+M2 V4L2 框架驗證
+   ├─ media-ctl 確認 link、v4l2-ctl 列出 formats
+   └─ 通過：/dev/video0 存在、format 正確
+
+M3 Argus 層
+   ├─ argus_camera --list-cameras 對照 video node
+   └─ 通過：Argus 能列舉並取流
+
+M4 Holoscan 管線
+   ├─ 建立 SensorSourceOp → SinkOp 的最小管線
+   └─ 通過：Holoscan log 顯示 VideoFrame 輸出
+
+M5 路徑抽象
+   ├─ 定義 source interface（CSI 實作 + HSB 實作）
+   └─ 通過：切換 source 實作，上層 app 不變
+
+M6 回歸
+   └─ 通過：兩路徑取流 + RAW 內容一致</pre></div>
+  <div class="callout"><strong>專案要點：</strong>framework 專案的成敗在「抽象邊界」。把「感測器來源」抽成 interface，CSI/HSB 只是兩種實作——這讓 Orin→Thor 遷移、CSI→HSB 切換都是小改動。</div>
+
+  <h2>4.14 量測 / 驗證 SOP：相機框架分層驗證</h2>
+  <div class="demo-block"><div class="demo-label">框架 SOP（Step 1–6）</div><pre>Step 1 驅動層
+   dmesg | grep -i -E "ov9281|probe|tegra-capture"
+   # 通過：無 error、probe 成功
+Step 2 裝置節點
+   ls /dev/video* /dev/media* /dev/v4l-subdev*
+Step 3 media graph
+   media-ctl -p -d /dev/media0
+   # 通過：感測器→CSI→VI→video 四層全啟用
+Step 4 格式清單
+   v4l2-ctl -d /dev/video0 --list-formats-ext
+Step 5 Argus 對照
+   argus_camera --list-cameras
+Step 6 Holoscan
+   跑最小管線，確認 SensorSourceOp 輸出
+
+判讀指標：
+  media graph 缺層 → DTB/驅動問題
+  Argus 找不到 → sensor mode 對照問題
+  Holoscan 無輸出 → HSB channel 或格式不匹配</pre></div>
+
+  <h2>4.15 平台間對照：相機框架與驅動</h2>
+  <table>
+  <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+  <tr><td>使用者層框架</td><td>V4L2 + Argus + Holoscan</td><td>libcamera（rpicam）</td><td>V4L2</td><td>V4L2 + Argus</td></tr>
+  <tr><td>驅動模型</td><td>tegracam（V4L2 subdev）</td><td>libcamera driver</td><td>V4L2 subdev</td><td>tegracam（V4L2 subdev）</td></tr>
+  <tr><td>GPU 資料框架</td><td>✅ Holoscan（GPUDirect）</td><td>❌（CPU 為主）</td><td>❌</td><td>⚠️ 部分（CUDA 可用）</td></tr>
+  <tr><td>HSB 感測器通道</td><td>✅ Holoscan channel</td><td>❌</td><td>❌</td><td>❌</td></tr>
+  <tr><td>DTB overlay</td><td>✅ 標準</td><td>✅ dtoverlay 檔</td><td>✅ DTB</td><td>✅ 標準</td></tr>
+  </table>
+  <div class="callout"><strong>選擇思考：</strong>Thor/Orin 的驅動模型同源（tegracam + Argus），Orin 的技能幾乎可平移。RPi5 的 libcamera 是不同框架——但「感測器 register」與「V4L2 概念」仍是共通語言。</div>
+
+  <h2>4.16 互動式檢核清單</h2>
+  <ul>
+  <li>- [ ] 我能畫出「感測器驅動 → V4L2 → Argus → Holoscan」四層並標出各自職責。</li>
+  <li>- [ ] 我能用 media-ctl 讀出完整 media graph 並判斷哪層斷了。</li>
+  <li>- [ ] 我能用 dmesg 找到 probe 成功/失敗的關鍵行。</li>
+  <li>- [ ] 我能建立一個最小 Holoscan 管線（Source→Sink）並確認輸出。</li>
+  <li>- [ ] 我能說明 Argus 相機編號與 V4L2 node 的對照方法。</li>
+  <li>- [ ] 我能解釋 GPUDirect 對多感測器管線延遲的影響。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

@@ -124,6 +124,49 @@ sudo i2ctransfer -y &lt;bus&gt; w2@0x36 0x30 0x0a r1
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>3.15 進階真實情境 Worked Example：HSB 橋接下的 I2C 批次寫入</h2>
+  <p>場景：Thor T5000 透過 HSB 初始化一顆 OV5640（需要寫入約 200 個 register 完成 init table），I2C 走乙太網路橋接，每筆 write 往返延遲約 50 µs（遠高於本地 I2C 的 10 µs）。</p>
+  <div class="demo-block"><div class="demo-label">HSB 下 init table 寫入策略</div><pre><span class="hl-c"># 問題：200 個 register × 50 µs = 10 ms（本地只需 2 ms）</span>
+<span class="hl-c"># 某些 OV5640 register 有嚴格時序要求（如 PLL 設定後需等待 5 ms）</span>
+
+<span class="hl-c"># 方案 A：批次寫入（一次 transaction 多筆 register）</span>
+i2ctransfer -y &lt;bus&gt; w21@0x3c 0x30 0x0a ... <span class="hl-c"># 21 bytes = 2 addr + 19 data</span>
+<span class="hl-c"># 優點：減少往返次數，但橋接佇列深度有限（通常 8-16 筆）</span>
+
+<span class="hl-c"># 方案 B：拆分 + 確認</span>
+<span class="hl-c"># 把 init table 拆成 PLL / 感測器 / 輸出 三段</span>
+<span class="hl-c"># 每段結尾回讀關鍵 register 驗證</span>
+段 1 (PLL)：寫入 30 個 → 回讀 0x3034 確認 bit mode
+段 2 (Sensor)：寫入 120 個 → 回讀 0x300A 確認 ID
+段 3 (Output)：寫入 50 個 → 回讀 0x3035 確認 frame rate
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 批次寫入降低 latency，但要控制在橋接佇列深度內</span>
+<span class="hl-c"># 2. 每段結尾回讀：若 PLL 設錯，後面全錯——先確認 PLL 才繼續</span>
+<span class="hl-c"># 3. 整個 init table 寫入 + 驗證控制在 20 ms 內完成</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>HSB 的 I2C 延遲是 CSI 的 5 倍。解決方案不是「忍受」而是「重組」——把 init table 按功能分段、每段結束時做「關鍵 register 回讀」，確保前段正確才繼續後段。</div>
+
+  <h2>3.16 深入原理擴充：I2C 在 Thor HSB 橋接中的封包化</h2>
+  <p>走 HSB 時，I2C 讀寫不是直接走 PCB 上的匯流排，而是被封裝成乙太網路訊框。每次 I2C transaction 會產生一個帶有時間戳的 UDP 封包，經 25GbE 傳到 host 端橋接器再轉成 I2C 訊號。這代表：① 每筆 I2C 操作有固定的封包開銷（~20 bytes header）② 同一 I2C bus 上的多顆感測器可能因橋接佇列競爭而延遲 ③ 乙太網路的 jitter 會直接反映在 I2C timing 上。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若同時對 HSB 上的 4 顆感測器下 I2C 寫入，橋接器的 I2C 匯流排會被序列化（一次只能處理一筆），但乙太網路封包是並行的。這可能導致「先發的命令反而後到」——即 I2C command reordering。驅動層必須在時間敏感的 register（如 reset、PLL unlock）前加入 read-back 驗證，不能假設寫入順序。</div>
+
+  <h2>3.17 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>i2cdetect 能看到感測器但 i2cget 回 0x00</td><td>RESET pin 未釋放或 clock 未啟動，感測器「有電但不回應」</td><td>確認上電時序（unit-06）：電源穩定 → MCLK → RESET 釋放 → 等待 1ms → 再下 I2C</td></tr>
+  <tr><td>HSB 下 i2cctransfer 偶發 NAK</td><td>橋接佇列滿或乙太網路 jitter 造成 I2C clock stretching 超時</td><td>降低 I2C 頻率（400K → 100K）；在密集寫入間插入 1 ms 延遲</td></tr>
+  <tr><td>回讀 register 值與寫入值不一致（bit flip）</td><td>I2C 匯流排雜訊 / 上拉電阻值不對 / 線材過長</td><td>縮短 I2C 線長；確認上拉電阻（4.7K 到 3.3V）；用邏輯分析儀抓波形</td></tr>
+  <tr><td>多顆感測器在同一 I2C bus 時，A 的設定影響 B</td><td>位址衝突或 broadcast register 被意外寫入</td><td>用 i2cdetect 全域掃描確認各感測器位址無衝突；避免寫入 broadcast register</td></tr>
+  <tr><td>HSB 橋接的 I2C 比本地慢 5 倍但規格寫支援 400 KHz</td><td>400 KHz 是 I2C 訊號速率，不含乙太網路封包往返延遲</td><td>這是正常行為；批次寫入減少往返次數才是正解</td></tr>
+  </table>
+
+  <h2>3.18 進階挑戰題</h2>
+  <ol>
+  <li>在 HSB 環境下，設計一個 I2C init table 的「斷點續傳」機制：若寫入第 87 個 register 時 I2C 失敗，如何不從頭開始、只重試失敗段落並驗證前面已正確寫入？</li>
+  <li>用邏輯分析儀同時抓取 HSB 橋接器的乙太網路端與 I2C 端，量測一次 i2ctransfer 的「封包化延遲」分佈。畫出 histogram，找出 P99 延遲，並說明它對感測器 init 時序的影響。</li>
+  <li>若你需要在 Thor 上同時初始化 6 顆 OV9281（每顆 init table 約 50 個 register），計算在 I2C 橋接延遲 50 µs/筆下的最短初始化時間，並設計一個平行初始化策略讓六顆感測器在 10 ms 內全部就緒。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-02.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 2 · 影像感測器基礎</div></a>
     <a class="np-next" href="unit-04.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 4 · 平台相機框架與驅動</div></a>

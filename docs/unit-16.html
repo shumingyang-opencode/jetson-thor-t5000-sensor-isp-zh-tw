@@ -184,6 +184,54 @@ Gate E：融合輸出
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>16.16 進階真實情境 Worked Example：六感測器物流分揀系統</h2>
+  <p>場景：Thor T5000 用於自動物流分揀線。6 顆 OV5640（5 MP、RAW12、30 fps）分別拍攝包裹的頂面與四個側面，Holoscan 管線即時做 3D 重建與條碼讀取。</p>
+  <div class="demo-block"><div class="demo-label">六感測器系統的完整驗證</div><pre><span class="hl-c"># 頻寬計算：</span>
+<span class="hl-c"># 每顆 OV5640：2592×1944×12×30 = 1.80 Gbps</span>
+<span class="hl-c"># 6 顆 = 10.8 Gbps</span>
+<span class="hl-c"># 25GbE 可用（70%）= 17.5 Gbps → 可行</span>
+
+<span class="hl-c"># Gate A：各自 bring-up</span>
+<span class="hl-c"># 6 顆逐一驗證：I2C 通、ID 正確、取 RAW 正常、無 CSI/HSB error</span>
+
+<span class="hl-c"># Gate B：各自畫質</span>
+<span class="hl-c"># 黑位、Bayer、LSC、AWB、SNR 通過門檻</span>
+<span class="hl-c"># 每顆的 LSC 獨立校正（不同角度、不同 shading）</span>
+
+<span class="hl-c"># Gate C：同步</span>
+<span class="hl-c"># 6 路 frame counter 無跳號</span>
+<span class="hl-c"># 曝光 timestamp 差 ≤ 0.5 ms（用 PTP 同步）</span>
+
+<span class="hl-c"># Gate D：頻寬與長跑</span>
+<span class="hl-c"># Σ raw bitrate + overhead < 17.5 Gbps</span>
+<span class="hl-c"># 2 小時無 drop、queue 不持續成長</span>
+
+<span class="hl-c"># Gate E：融合輸出</span>
+<span class="hl-c"># 3D 重建精度 < 1 mm（用標準尺寸方塊驗證）</span>
+<span class="hl-c"># 條碼讀取率 > 99.5%（用 100 個不同角度包裹測試）</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>六感測器系統的驗證必須逐 Gate 通過。Gate A 通過不代表 Gate E 通過——同步、頻寬、融合各自有獨立的驗證標準。</div>
+
+  <h2>16.17 深入原理擴充：多感測器的 PTP 時間同步精度</h2>
+  <p>IEEE 1588 PTP（Precision Time Protocol）可把多台設備的時鐘同步到 < 1 µs 精度。但 HSB 橋接器的 PTP 實作可能有數百 µs 的 jitter（取決於橋接器品質）。在「同一台 Thor 內」的多感測器，用 FSIN（Frame Sync）硬體 pin 同步更精準（< 1 line time ≈ 17 µs）。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若 6 顆感測器分佈在不同位置（車身、手臂、頭部），FSIN 走線過長會引入傳播延遲（~5 ns/m）。6 顆分散在 5 米範圍內，最遠兩顆的 FSIN 延遲差 ~25 ns——對 30 fps 來說可忽略（< 0.001%），但對 240 fps 高速攝影需考慮。</div>
+
+  <h2>16.18 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>6 路取流中有一路偶發掉幀但其他路正常</td><td>該路的 HSB channel 有網路 drop 或 buffer 不足</td><td>用 ethtool 檢查該路 drop 計數；增加 buffer deep queue</td></tr>
+  <tr><td>3D 重建精度 < 2 mm（目標 < 1 mm）</td><td>感測器同步精度不足 / 鏡頭校正有誤</td><td>驗證 PTP/FSIN 同步精度；重新做攝影機標定</td></tr>
+  <tr><td>條碼讀取率在某些角度降到 90%</td><td>該角度的感測器曝光或對焦不理想</td><td>獨立調整該路感測器的 AE ROI 與對焦</td></tr>
+  <tr><td>2 小時長跑後 queue 持續成長</td><td>某路的 GPU 處理延遲增加（thermal throttling）</td><td>監控 GPU 溫度；加入散熱措施或降低處理複雜度</td></tr>
+  <tr><td>6 路同時 init 時有 1-2 顆失敗</td><td>I2C 橋接佇列滿 / 位址衝突</td><td>逐顆初始化避免佇列競爭；確認各感測器 I2C 位址無衝突</td></tr>
+  </table>
+
+  <h2>16.19 進階挑戰題</h2>
+  <ol>
+  <li>設計一個六感測器系統的「降級模式」：當其中一路感測器故障時，系統自動切換到五路模式，3D 重建精度降級但不中斷。畫出完整的 failover 流程圖。</li>
+  <li>分析 PTP vs FSIN 在六感測器同步上的精度差異。設計一個實驗：用高速相機（> 1000 fps）同時拍攝 6 路的 LED 指示燈，量測同步精度，畫出 histogram。</li>
+  <li>為物流分揀系統設計一個完整的 SOP 文件：從硬體安裝、感測器校正、同步設定、融合驗證到長時間穩定性測試。格式參考 unit-14.7 的 tuning log，但擴展到多感測器系統。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-15.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 15 · 四平台影像調校功能比較</div></a>
     <a class="np-next" href="index.html"><div class="np-label">課程完成 →</div><div class="np-name">回首頁 · 單元教學目錄</div></a>

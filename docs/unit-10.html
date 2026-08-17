@@ -167,6 +167,51 @@ banding（條紋）：
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>10.18 進階真實情境 Worked Example：60 fps 機器人高速取像的曝光預算</h2>
+  <p>場景：Thor T5000 搭載在 AGV（自動引導車）上，OV9281 @ 60 fps 做 SLAM。AGV 速度 2 m/s，目標清晰 SLAM 特徵點（motion blur < 1 pixel）。</p>
+  <div class="demo-block"><div class="demo-label">Motion blur 反推曝光上限</div><pre><span class="hl-c"># SLAM 要求：motion blur < 1 pixel</span>
+<span class="hl-c"># OV9281 像素尺寸 3.0 µm，鏡頭焦距 2.8 mm</span>
+<span class="hl-c"># 1 pixel 在物方的寬度 = 3.0 µm × (物距/焦距)</span>
+<span class="hl-c"># 物距 1 m → 1 pixel ≈ 1.07 mm</span>
+<span class="hl-c"># AGV 速度 2 m/s → 最大曝光 = 1.07 mm / 2 m/s = 0.535 ms</span>
+
+<span class="hl-c"># 60 fps → frame interval = 16.67 ms</span>
+<span class="hl-c"># 最大曝光 0.535 ms << 16.67 ms → 有充足時間</span>
+<span class="hl-c"># 但曝光太短 → SNR 可能不足</span>
+
+<span class="hl-c"># SNR 驗證（ OV9281：full well 10000 e⁻, QE 60%）</span>
+<span class="hl-c"># 曝光 0.5 ms、場景 500 lux：</span>
+<span class="hl-c"># 光子數 ≈ 500 × 0.5 ms × 像素面積 × 120 lm/W ≈ 假設 800 光子</span>
+<span class="hl-c"># 電子數 = 800 × 0.6 = 480 e⁻</span>
+<span class="hl-c"># SNR = 20·log10(480/√480) ≈ 26.6 dB（偏低）</span>
+
+<span class="hl-c"># 解決方案：</span>
+<span class="hl-c"># 1. 提高增益 → 雜訊增加 → SNR 更差</span>
+<span class="hl-c"># 2. 補光 → 光子數增加 → SNR 提升 → 推薦</span>
+<span class="hl-c"># 3. 加大光圈 → 更多光子 → 同時景深縮小（SLAM 可能需要）</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>高速 SLAM 的曝光上限由 motion blur 決定，不是由 FPS 決定。先用「blur < 1 pixel」算出最大曝光，再用「SNR ≥ 30 dB」驗證。兩者矛盾時，補光是唯一不犧牲品質的解法。</div>
+
+  <h2>10.19 深入原理擴充：Thor 的 AE ROI 與區域統計</h2>
+  <p>NVIDIA ISP 的 AE 支援 <strong>多區域統計（multi-zone statistics）</strong>：把畫面分成 N×M 格子，每格獨立計算亮度。AE 演算法可以針對特定 ROI（Region of Interest）調整曝光，而非只看全畫面平均。這在「前景暗 + 背景亮」的場景中至關重要。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若 AE ROI 設定在畫面中央但主體在邊緣（例如機器人手臂在畫面右下），AE 會被中央背景主導，導致手臂過暗。在多感測器系統中，每顆感測器的 AE ROI 必須獨立設定，且需與 Holoscan 管線中的目標偵測 ROI 對齊。</div>
+
+  <h2>10.20 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>AE 收斂後畫面仍過暗，gain 已達上限</td><td>曝光時間被 frame length clamp（上限卡住）</td><td>讀回 applied exposure 與 max exposure；若已卡上限 → 補光或降 fps</td></tr>
+  <tr><td>日光燈下畫面有水平亮暗帶</td><td>曝光時間非市電週期整數倍（50/60 Hz banding）</td><td>啟用 anti-flicker 模式或手動設定曝光為 10 ms 整數倍</td></tr>
+  <tr><td>ROI 外的主體過暗</td><td>AE ROI 未覆蓋主體區域</td><td>重新設定 AE ROI；或用全畫面平均 AE + 手動微調</td></tr>
+  <tr><td>動態場景中曝光跳動</td><td>AE 反應速度過快 / 統計延遲導致 overshoot</td><td>降低 AE convergence speed；增加 temporal smoothing</td></tr>
+  <tr><td>60 fps mode 下最大曝光 < 1 ms 但仍過亮</td><td>場景光線過強，即使最短曝光仍飽和</td><td>加入 ND filter 或縮小光圈；感測器端限制最大 analog gain</td></tr>
+  </table>
+
+  <h2>10.21 進階挑戰題</h2>
+  <ol>
+  <li>設計一個 SLAM 專用的 AE 策略：在 60 fps 下動態調整曝光，確保 motion blur < 1 pixel 的同時 SNR ≥ 28 dB。若場景光線不足，自動觸發補光。畫出完整的控制流程圖。</li>
+  <li>分析 anti-flicker 在 50 Hz 與 60 Hz 電源下對 FPS 的影響：若曝光必須是 10 ms 整數倍，最大可用 FPS 各是多少？若場景光源同時有 50 Hz 與 60 Hz（混合光源），如何設定 anti-flicker？</li>
+  <li>在 Thor 的多感測器系統中，設計一個「AE 優先級」機制：前視感測器的 AE 優先級高於側視。當兩者的曝光需求衝突時，如何在 Holoscan 管線中實現「優先滿足前視」的策略？</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-09.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 9 · 各平台 ISP 架構差異</div></a>
     <a class="np-next" href="unit-11.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 11 · 白平衡與色彩（AWB/CCM）</div></a>

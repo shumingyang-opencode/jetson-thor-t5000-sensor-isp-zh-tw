@@ -128,6 +128,64 @@ tone mapping：用 S 曲線（log 或自訂）：
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>14.13 進階真實情境 Worked Example：從 RAW 到部署的完整調校工作流</h2>
+  <p>場景：Thor T5000 用於食品瑕疵偵測。OV9281 拍攝流水線上的食品，目標：偵測 0.5mm 以下的裂痕。需要清晰度高、色彩精準、無雜訊假影。</p>
+  <div class="demo-block"><div class="demo-label">食品瑕疵偵測調校 SOP</div><pre><span class="hl-c"># Step 1：感測器 init（unit-06）</span>
+<span class="hl-c"># OV9281 @ 1280×800 RAW10, 60 fps</span>
+
+<span class="hl-c"># Step 2：黑位校正</span>
+<span class="hl-c"># 拍黑框（鏡頭蓋），量測 black level = 64</span>
+<span class="hl-c"># 設定 OB offset = 64</span>
+
+<span class="hl-c"># Step 3：LSC 校正</span>
+<span class="hl-c"># 拍灰卡，產生 LSC 網格</span>
+<span class="hl-c"># 驗證：四角亮度差 < 3%</span>
+
+<span class="hl-c"># Step 4：AWB + CCM</span>
+<span class="hl-c"># 灰卡校正 AWB gains → R=G=B</span>
+<span class="hl-c"># 色卡校正 CCM → ΔE < 3</span>
+
+<span class="hl-c"># Step 5：AE 基準</span>
+<span class="hl-c"># 設定 AE target = 50%（中間亮度）</span>
+<span class="hl-c"># 驗證：灰卡 histogram 峰值在 45-55%</span>
+
+<span class="hl-c"># Step 6：NR ↔ Sharpen 取捨</span>
+<span class="hl-c"># 食品裂痕是「高頻細節」→ NR 不能太強</span>
+<span class="hl-c"># spatial NR = low, temporal NR = medium</span>
+<span class="hl-c"># sharpen k = 0.5（輕銳化，避免 halo）</span>
+
+<span class="hl-c"># Step 7：回歸測試</span>
+<span class="hl-c"># 室內日光、日光燈、混合光源各測 100 張</span>
+<span class="hl-c"># 瑕疵偵測率 > 99% → 通過</span>
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 瑕疵偵測需要「清晰度」而非「美感」→ NR 偏保守、sharpen 偏激進</span>
+<span class="hl-c"># 2. 食品色差是判斷依據 → AWB/CCM 必須精準（ΔE < 3）</span>
+<span class="hl-c"># 3. 流水線光源固定 → AE 目標固定、AWB 收斂快</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>工業視覺的調校目標是「量化指標」而非「好看」。每個步驟都有明確的通過門檻（black level 值、亮度差 %、ΔE、偵測率），不是主觀判斷。</div>
+
+  <h2>14.14 深入原理擴充：MTF 與空間頻率響應</h2>
+  <p>清晰度不只是「看起來銳利」。衡量鏡頭+感測器解析能力的客觀指標是 <strong>MTF（Modulation Transfer Function）</strong>：在不同空間頻率（lp/mm）下的對比度保留率。MTF50（對比度降到 50% 的頻率）是常用的清晰度指標。</p>
+  <div class="pipe"><span class="step">鏡頭 MTF</span><span class="arr">×</span><span class="step">感測器 MTF（pixel pitch 決定 Nyquist）</span><span class="arr">×</span><span class="step">ISP sharpen</span><span class="arr">=</span><span class="step">系統 MTF</span></div>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>Sharpen 只能在鏡頭+感測器的 MTF 範圍內「增強」，無法「創造」不存在的細節。若鏡頭 MTF50 = 80 lp/mm 但感測器 Nyquist = 60 lp/mm，sharpen 無法恢復 60 lp/mm 以上的資訊——因為感測器已經 aliasing 了。正確做法是先確認硬體 MTF 足夠，再用 sharpen 微調。</div>
+
+  <h2>14.15 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>過度銳化產生邊緣白邊（halo）</td><td>sharpen k 值過高</td><td>降低 k 值至 0.3–0.5；用 100% 放大檢視邊緣</td></tr>
+  <tr><td>食物色差判斷不準</td><td>CCM 未校正 / AWB 收斂不完全</td><td>用色卡重新校正 CCM；固定光源下驗證 ΔE</td></tr>
+  <tr><td>流水線高速移動時影像模糊</td><td>曝光時間過長導致 motion blur</td><td>縮短曝光、提高補光、提高 analog gain</td></tr>
+  <tr><td>tuning log 不完整導致無法重現</td><td>未記錄每次改動的參數與場景</td><td>使用 unit-14.7 的 tuning log 範本，每次改動都記錄</td></tr>
+  <tr><td>多場景回歸失敗</td><td>調校只在單一場景最佳化</td><td>擴大回歸測試集：室內、日光、混合、低光各測 100 張</td></tr>
+  </table>
+
+  <h2>14.16 進階挑戰題</h2>
+  <ol>
+  <li>設計一個 MTF 量測實驗：用 ISO 12233 解析度測試圖，量測你的鏡頭+感測器+ISP 系統的 MTF50。比較銳化前後的 MTF 曲線，找出最佳 sharpen k 值。</li>
+  <li>為食品瑕疵偵測場景設計一個 tone mapping 曲線：確保 0.5mm 裂痕在 8-bit 輸出中至少有 10 code 的對比度。畫出輸入-輸出映射曲線。</li>
+  <li>建立一個自動化調校回歸系統：輸入 raw tuning 參數，自動跑完「灰卡 → 色卡 → 多場景」測試，輸出 HTML 報告含 histogram、ΔE、SNR 與 latency。比較兩組 tuning 參數的優劣。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-13.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 13 · 雜訊與降噪</div></a>
     <a class="np-next" href="unit-15.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 15 · 四平台影像調校功能比較</div></a>

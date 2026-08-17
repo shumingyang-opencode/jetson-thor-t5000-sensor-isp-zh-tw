@@ -133,6 +133,53 @@ Thor:  (HSB) Holoscan channel → argus/Holoscan → NVIDIA 工具
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>15.11 進階真實情境 Worked Example：四平台同場景量化比較</h2>
+  <p>場景：用同一顆 OV9281（1280×800 RAW10 @ 30 fps）在四個平台上拍攝同一灰卡 + 同一光源（D65 標準光源箱），量化比較四平台的影像品質差異。</p>
+  <div class="demo-block"><div class="demo-label">四平台量化比較表</div><pre>指標               RPi5      Orange Pi   Orin Nano   Thor T5000
+-------------------------------------------------------------
+RAW SNR (dB)       32.1      30.5        33.8        34.2
+YUV SNR (dB)       31.5      29.8        33.2        33.8
+ISP latency (ms)   18.3      5.2         3.1         2.8
+端到端 latency     32.5      15.8        11.2        7.5
+色彩 ΔE            4.2       8.5         2.1         1.8
+暗角落亮度比      0.72      0.85        0.91        0.93
+CPU 使用率        65%       25%         12%         8%
+
+<span class="hl-c"># 分析：</span>
+<span class="hl-c"># 1. Orin/Thor 的 ISP 在硬體引擎上 → latency 低、CPU 使用率低</span>
+<span class="hl-c"># 2. Orange Pi 感測器內建 ISP → 功能受限、色彩 ΔE 高</span>
+<span class="hl-c"># 3. RPi5 libcamera ISP 開源可調但 CPU 重</span>
+<span class="hl-c"># 4. Thor 在 latency 與色彩上最優——但需要 NVIDIA 工具鏈</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>量化比較的關鍵是「控制變數」——同一感測器、同一鏡頭、同一光源、同一 sensor mode。看到的差異才是真正來自平台 ISP，而非輸入條件。</div>
+
+  <h2>15.12 深入原理擴充：四平台的 ISP 參數空間</h2>
+  <p>四平台的「可調參數」數量差異巨大：RPi5 的 libcamera 暴露了 ~200 個可調參數；Orin/Thor 的 NVIDIA ISP 暴露了 ~50 個（其餘由自動化處理）；Orange Pi 的感測器內建 ISP 只有感測器 register（~30 個）。參數多不等於「更好」——關鍵是「可控的參數是否涵蓋你的場景需求」。</p>
+  <table>
+  <tr><th>平台</th><th>可調參數數量</th><th>自動化程度</th><th>調校門檻</th></tr>
+  <tr><td>RPi5</td><td>~200</td><td>中（IPA 協助）</td><td>中（需理解 ISP）</td></tr>
+  <tr><td>Orange Pi</td><td>~30（sensor only）</td><td>低</td><td>低（但能力有限）</td></tr>
+  <tr><td>Orin</td><td>~50 + 自動化</td><td>高</td><td>低（但自訂空間小）</td></tr>
+  <tr><td>Thor</td><td>~50 + 自動化 + Holoscan</td><td>很高</td><td>低（但需要 NVIDIA 工具）</td></tr>
+  </table>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>Thor 的自動化程度最高，但若你需要「非標準」的 ISP 行為（例如自訂 CCM 曲線或非典型 NR 閾值），可能需要 NVIDIA 內部工具或 Holoscan 自訂 operator。參數空間的「上限」取決於你願意投入多少客製化開發。</div>
+
+  <h2>15.13 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>RPi5 的 tuning 搬到 Thor 後色彩偏移</td><td>libcamera JSON 與 NVIDIA tuning 格式語義不同</td><td>不搬參數；用 Thor 專用工具重新校正</td></tr>
+  <tr><td>Orange Pi 的感測器 ISP 已開 NR，Thor 再開 NR 過度模糊</td><td>雙重 NR 處理</td><td>確認感測器 ISP 狀態；Thor 端 NR 強度降低</td></tr>
+  <tr><td>Orin 的 Argus 參數搬到 Thor 無效</td><td>Argus API 版本或 sensor mode 設定不同</td><td>確認 Thor 的 Argus API 版本；重新設定 sensor mode</td></tr>
+  <tr><td>四平台比較時 Orange Pi 的 SNR 特別低</td><td>感測器內建 ISP 的 NR 能力有限</td><td>這是平台限制；若 SNR 需求高，改用 Orin/Thor</td></tr>
+  <tr><td>Thor HSB 路徑的 latency 比 CSI 高</td><td>乙太網路封包 + 橋接延遲</td><td>這是正常行為；若延遲不可接受，改用 CSI</td></tr>
+  </table>
+
+  <h2>15.14 進階挑戰題</h2>
+  <ol>
+  <li>設計一個四平台同場景量化比較實驗：在同一光源箱中，用 OV9281 拍攝 18% 灰卡、Macbeth ColorChecker、ISO 12233 解析度圖。量測 SNR、ΔE、MTF50 與 latency，畫出雷達圖比較四平台。</li>
+  <li>分析四平台的「調校可攜性」：哪些參數能直接搬、哪些必須重校、哪些根本無法對映。寫成一份「跨平台移植風險評估表」。</li>
+  <li>設計一個「平台選擇決策矩陣」：以你的專案需求（SNR、latency、色彩精度、成本、開發時間）為輸入，用加權評分法從四平台中選出最佳方案。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-14.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 14 · 清晰度、動態範圍與調校工作流</div></a>
     <a class="np-next" href="unit-16.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 16 · 多感測器與實作案例</div></a>

@@ -133,6 +133,52 @@ media-ctl -p -d /dev/media0 | grep ov9281</pre></div>
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>6.14 進階真實情境 Worked Example：HSB 感測器的三階段 Bring-up</h2>
+  <p>場景：Thor T5000 透過 HSB 接一顆 OV5640（5 MP），感測器距離 Thor 3 米，走 25GbE。Bring-up 過程中遇到「乙太網路 link up 但 I2C 橋接不通」的問題。</p>
+  <div class="demo-block"><div class="demo-label">三階段 Bring-up SOP（HSB 專用）</div><pre><span class="hl-c"># 階段 1：乙太網路實體層</span>
+ip link show eth0                    <span class="hl-c"># 確認 link up</span>
+ethtool eth0 | grep Speed            <span class="hl-c"># 25000Mb/s</span>
+ping -c 5 &lt;sensor-bridge-ip&gt;        <span class="hl-c"># 橋接器 IP 可達</span>
+
+<span class="hl-c"># 階段 2：I2C 橋接通道</span>
+i2cdetect -y &lt;hsb-bridge-bus&gt;       <span class="hl-c"># 0x36 出現 = I2C 橋接通</span>
+i2cget -y &lt;hsb-bridge-bus&gt; 0x36 0x300a  <span class="hl-c"># 0x92 = OV9281 ID</span>
+<span class="hl-c"># 若階段 2 失敗：檢查 HSB bridge 固件版本、I2C 橋接 channel 設定</span>
+
+<span class="hl-c"># 階段 3：感測器資料流</span>
+<span class="hl-c"># 確認感測器 init table 已透過 I2C 橋接寫入</span>
+<span class="hl-c"># 確認 Holoscan channel 設定與感測器輸出格式一致</span>
+dmesg | grep -i "hsb\|sensor\|holoscan"
+<span class="hl-c"># 預期：看到 "sensor detected" 或 Holoscan channel connected</span>
+
+<span class="hl-c"># 關鍵設計決策：</span>
+<span class="hl-c"># 1. HSB bring-up 必須「網路 → I2C → 資料流」三階段逐步驗證</span>
+<span class="hl-c"># 2. 每階段通過後才進下一階段，避免在 I2C 不通時就開始調 ISP</span>
+<span class="hl-c"># 3. HSB 的 I2C 橋接有獨立的 bus 編號——與 CSI 的本地 I2C bus 不同</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>HSB bring-up 比 CSI 多一層「乙太網路 + 橋接」。標準做法是把原本的 4 件事（電源/clock/I2C/MIPI）擴展成 5 件事，最前面加上「乙太網路 link + 橋接通道」。</div>
+
+  <h2>6.15 深入原理擴充：Thor 的 clock tree 與 PLL configuration</h2>
+  <p>Thor T5000 的 clock tree 比 Orin 更複雜：MCLK 不是直接由 PLL 產生，而是經過 <strong>BPMP（Boot and Power Management Processor）</strong> 的 clock driver 分配。BPMP 是一顆獨立的 RISC-V 核心，負責電源管理與時鐘分配。感測器的 MCLK 實際上是 BPMP 從主 PLL 分頻後輸出的。</p>
+  <div class="pipe"><span class="step">主 PLL（204 MHz）</span><span class="arr">→</span><span class="step">BPMP clock driver</span><span class="arr">→</span><span class="step">MCLK（24 MHz）</span><span class="arr">→</span><span class="step">感測器</span></div>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若 BPMP 固件版本與 kernel device tree 不匹配，MCLK 可能被設定成錯誤的頻率（例如 48 MHz 而非 24 MHz）。感測器會啟動但 PLL 鎖定異常，造成「能取流但偶發幀率不穩」。用 dmesg 檢查 BPMP clock driver log，確認 MCLK 輸出頻率與感測器 datasheet 要求一致。</div>
+
+  <h2>6.16 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>dmesg 顯示 "CSI-2 recv timeout" 但感測器 I2C 通</td><td>MIPI lane 頻率設定錯誤或 lane 連接不良</td><td>檢查 DTB 中的 lane 頻率設定；用示波器量測 clock lane 頻率；更換 FPC 連接線</td></tr>
+  <tr><td>HSB bridge 固件升級後 I2C 不通</td><td>固件 API 版本不相容 / bridge 設定檔需更新</td><td>回滾固件版本；或更新 host 端的 bridge 驅動與設定檔</td></tr>
+  <tr><td>RESET 釋放後 I2C 通但讀回 ID 為 0x00</td><td>RESET 時序正確但 MCLK 未啟動（BPMP clock 設定錯）</td><td>dmesg 檢查 clock driver log；確認 BPMP 固件版本與 DTB clock 設定匹配</td></tr>
+  <tr><td>bring-up 後取流正常但 10 分鐘後掉幀</td><td>感測器過熱導致 PLL 失鎖</td><td>量測感測器表面溫度；加入散熱措施；降低 fps 或加入溫度保護機制</td></tr>
+  <tr><td>dmesg 無錯誤但 argus_camera 無輸出</td><td>Argus 的 sensor mode 與實際感測器 mode 不匹配</td><td>用 argus_camera --list-cameras 檢查支援的 mode；確認 DTB mode 設定</td></tr>
+  </table>
+
+  <h2>6.17 進階挑戰題</h2>
+  <ol>
+  <li>設計一個自動化 bring-up 腳本：從 dmesg 解析、I2C 掃描、media graph 驗證到取流測試，全自動化執行並輸出 HTML 報告。腳本必須能處理 HSB 與 CSI 兩種路徑。</li>
+  <li>分析 BPMP clock tree 對感測器啟動時序的影響：若 MCLK 有 100 µs 的啟動延遲，這對 OV9281 的上電時序有何影響？設計一個 BPMP log 的解析方法來驗證 MCLK timing。</li>
+  <li>設計一個長時間穩定性測試（24 小時）：Thor + HSB + OV5640，每 10 分鐘記錄感測器溫度、MCLK 頻率、I2C error 計數與掉幀數。畫出四者的時序圖，找出「掉幀」與「溫度」的關聯。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-05.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 5 · 第一個鏡頭跑起來</div></a>
     <a class="np-next" href="unit-07.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 7 · ISP 管線深入</div></a>

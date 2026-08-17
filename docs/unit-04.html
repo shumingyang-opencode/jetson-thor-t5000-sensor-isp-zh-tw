@@ -111,6 +111,46 @@ Application:
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>4.9 進階真實情境 Worked Example：從 V4L2 遷移到 Holoscan 的雙軌並行</h2>
+  <p>場景：團隊原本在 Orin Nano 上用 V4L2 + Argus 取流跑瑕疵偵測，現在要遷移到 Thor T5000。同時要支援 CSI（實驗室原型）與 HSB（量產部署）兩種路徑。</p>
+  <div class="demo-block"><div class="demo-label">雙軌架構設計</div><pre><span class="hl-c"># Phase 1：CSI 路徑（實驗室，與 Orin 相同語法）</span>
+Argus → SensorMode → v4l2 video node → ISP → CUDA
+<span class="hl-c"># 驗證：media-ctl -p 看到完整管線；argus_camera 出圖</span>
+
+<span class="hl-c"># Phase 2：HSB 路徑（量產，乙太網路）</span>
+SensorSourceOp（Holoscan）→ ISP operator → CUDA operator
+<span class="hl-c"># 驗證：Holoscan log 確認 SensorSourceOp 有輸出 VideoFrame</span>
+
+<span class="hl-c"># 共用層：ISP 調校參數、CUDA 推理模型、後處理邏輯</span>
+<span class="hl-c"># 差異層：感測器來源（Argus vs Holoscan SensorSource）</span>
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 抽象化「感測器來源」：上層 app 不直接呼叫 Argus/V4L2，而是透過 interface</span>
+<span class="hl-c"># 2. CSI 路徑用 Argus、HSB 路徑用 Holoscan——切換只換 source operator</span>
+<span class="hl-c"># 3. ISP 調校參數與 CUDA 模型兩路徑共用，避免維護兩套</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>遷移的關鍵不是「把 V4L2 換成 Holoscan」而是「抽離感測器來源」。把 app 分成「source / processing / output」三層，source 層因路徑而異，其餘共用。這才是 Orin → Thor 的最小變更遷移路徑。</div>
+
+  <h2>4.10 深入原理擴充：Holoscan 的 Operator Graph 與 GPU Direct</h2>
+  <p>Holoscan 以 directed acyclic graph（DAG）組織 operator。每個 operator 可宣告其 I/O 為 <strong>GPU memory</strong> 或 <strong>host memory</strong>。當相鄰 operator 都在 GPU memory 上操作時，資料不需要在 CPU↔GPU 之間來回搬移（zero-copy）。Thor 的 Blackwell GPU 支援 <strong>CUDA unified memory + GPUDirect</strong>，讓感測器 DMA 直接寫入 GPU 記憶體， Holoscan operator 從頭到尾在 GPU 上運行。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若 Holoscan operator graph 中混入一個宣告為 host memory 的 operator（例如 Python callback），整條管線會被強制插入 GPU↔CPU 拷貝。在 60 fps 的多感測器管線中，一次這樣的拷貝可能增加 2–3 ms 延遲。除錯方式：在 Holoscan log 中搜尋 "transfer" 或 "copy" 關鍵字，找出不該存在的記憶體搬移。</div>
+
+  <h2>4.11 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>media graph 有感測器 node 但 argus_camera 找不到</td><td>Argus 的 camera enumeration 與 V4L2 node 不對應</td><td>用 argus_camera --list-cameras 對照 media-ctl 輸出；確認 sensor mode 與 Argus enumerate 一致</td></tr>
+  <tr><td>Holoscan SensorSourceOp 啟動後無 VideoFrame 輸出</td><td>HSB channel 未連接或格式設定不匹配</td><td>檢查 Holoscan 設定檔中的 sensor channel 與 format；用 ip link show 確認乙太網路 link up</td></tr>
+  <tr><td>DTB overlay 重建後 dmesg 無變化</td><td>overlay 未被 kernel 載入（U-Boot 或 extlinux 未更新）</td><td>確認 /boot/extlinux 或 U-Boot 的 overlay 路徑正確；用 dmesg | grep overlay 確認載入</td></tr>
+  <tr><td>V4L2 subdev 存在但 format 設定被拒</td><td>感測器 mode 的 format 不在支援清單中</td><td>v4l2-ctl --list-formats-ext 查看所有支援的 format/mode 組合</td></tr>
+  <tr><td>Holoscan 管線啟動但 GPU 使用率異常低</td><td>Operator 未宣告 GPU memory，所有資料走 CPU 拷貝</td><td>檢視每個 operator 的 I/O 設定；確保 SensorSourceOp 直接輸出 GPU buffer</td></tr>
+  </table>
+
+  <h2>4.12 進階挑戰題</h2>
+  <ol>
+  <li>設計一個 Holoscan operator DAG：SensorSource → ISP → Resize（GPU）→ YOLO Inference（GPU）→ NMS（CPU）→ Display。計算在「NMS 改成 GPU」前後的端到端延遲差異，並說明 GPUDirect 在此管線中的效益。</li>
+  <li>若你在 Thor 上同時使用 CSI 路徑（4 顆感測器）與 HSB 路徑（2 顆感測器），畫出完整的 media graph + Holoscan graph 交織架構，標出哪些層級共用、哪些獨立。</li>
+  <li>分析 Argus 與 Holoscan 在 buffer management 上的差異：Argus 用 Request/Buffer queue，Holoscan 用 Tensor/VideoFrame。設計一個 adapter layer 讓同一個 ISP 調校參數集能同時服務兩種 buffer 抽象。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-03.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 3 · 感測器通訊介面</div></a>
     <a class="np-next" href="unit-05.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 5 · 第一個鏡頭跑起來</div></a>

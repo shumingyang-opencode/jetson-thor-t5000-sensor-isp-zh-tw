@@ -121,6 +121,49 @@ v4l2-ctl -d /dev/video0 --list-formats-ext</pre></div>
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>5.15 進階真實情境 Worked Example：多感測器同時取流的 buffer 競爭</h2>
+  <p>場景：Thor T5000 同時接 4 顆 OV9281（各 1280×800 RAW10 @ 120 fps），全部走 CSI。目標：4 路同時取流不掉幀。</p>
+  <div class="demo-block"><div class="demo-label">4 路取流的 buffer 策略</div><pre><span class="hl-c"># 單顆 OV9281：每幀 1280×800×10/8 = 1,280,000 bytes ≈ 1.22 MB</span>
+<span class="hl-c"># 4 顆 = 4.88 MB/幀 × 120 fps = 585.6 MB/s</span>
+<span class="hl-c"># Thor DDR 頻寬 > 100 GB/s → 資料面不是瓶頸</span>
+<span class="hl-c"># 瓶頸在：4 組 V4L2 queue 的 DMA 對齊與 buffer 分配</span>
+
+<span class="hl-c"># 方案：DMABUF + 3-buffer deep queue</span>
+v4l2-ctl -d /dev/video0 --stream-mmap=3 --stream-count=-1 <span class="hl-c"># continuous</span>
+v4l2-ctl -d /dev/video1 --stream-mmap=3 --stream-count=-1
+v4l2-ctl -d /dev/video2 --stream-mmap=3 --stream-count=-1
+v4l2-ctl -d /dev/video3 --stream-mmap=3 --stream-count=-1
+
+<span class="hl-c"># 每路 3 buffers × 1.22 MB = 3.66 MB × 4 路 = 14.6 MB</span>
+<span class="hl-c"># GPU DMABUF 池共需 ~15 MB</span>
+
+<span class="hl-c"># 驗證：4 路跑 10 分鐘，監控：</span>
+cat /sys/kernel/debug/v4l2/video*/queue_status
+<span class="hl-c"># 每路 queue 的 queued_count 應穩定在 1-2，不持續增加</span>
+<span class="hl-c"># 若某路 queued_count 持續上升 → 該路 buffer 被 GPU 占用太久 → 降該路 fps</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>4 路同時取流的瓶頸不是頻寬而是 buffer 管理。用 DMABUF 避免 CPU 拷貝，用 3-buffer deep queue 保底（一路在 ISP、一路在 GPU、一路在 queue）。監控 queue_status 是多感測器取流的標準除錯手法。</div>
+
+  <h2>5.16 深入原理擴充：V4L2 的 request API 與 Thor 的 multi-stream pipeline</h2>
+  <p>標準 V4L2 取流是「被動的」：driver 推帧、app 接。Thor 引入了 <strong>request API（media request）</strong>的增強版：app 可以「預先提交」下一幀的控制參數（曝光、增益），ISP 在該幀被取走時自動套用。這讓多感測器同步曝光成為可能——app 同時對 4 個 video node 提交相同時間戳的 request。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>request API 的時間戳精度依賴 kernel 的 clock domain。若 4 顆感測器的 video node 分屬不同的 clock source（例如 CSI lane group 不同），request 的套用時間可能差 1–2 行。對立體視覺等精確同步場景，必須用 hardware frame sync pin（FSIN）而非 request API 的軟體時間戳。</div>
+
+  <h2>5.17 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>v4l2-ctl 取流後檔案大小為 0</td><td>stream-count 設定為 0 或 format 未設定就取流</td><td>先 --set-fmt-video 再 --stream-mmap；確認 stream-count ≥ 1</td></tr>
+  <tr><td>4 路同時取流中有一路偶發 timeout</td><td>該路的 DMA buffer 被其他路或 GPU 佔用</td><td>增加該路 buffer deep queue；確認 DMABUF 池夠大；降低該路 fps</td></tr>
+  <tr><td>NV12 輸出檔案大小不等於 W×H×1.5</td><td>format 設定未生效，driver fallback 到其他 format</td><td>回讀 format（V4L2_QUERYBUF）確認實際 fourcc；用 --list-formats-ext 確認支援</td></tr>
+  <tr><td>argus_camera 出圖但 v4l2-ctl 取流畫面全黑</td><td>Argus 與 V4L2 使用不同的 buffer 路徑（DMABUF vs mmap）</td><td>統一 buffer 分配方式；或用 argus 做取流、v4l2-ctl 只做 format 驗證</td></tr>
+  <tr><td>HSB 路徑的取流延遲比 CSI 高 5 ms</td><td>乙太網路封包 + 橋接解包延遲</td><td>這是正常行為；若延遲不可接受，改用 CSI 或在 HSB 端減少封包大小</td></tr>
+  </table>
+
+  <h2>5.18 進階挑戰題</h2>
+  <ol>
+  <li>設計一個多感測器取流壓力測試：4 顆 OV9281 @ 120 fps 同時取流 1 小時，每 10 分鐘記錄每路的掉幀數、queue 深度與 GPU 使用率。找出瓶頸在哪一層。</li>
+  <li>分析 mmap vs DMABUF 在 4 路取流下的 CPU 使用率差異。用 time 工具量測 user/system 時間，畫出對照表。</li>
+  <li>若你要在 Holoscan 管線中同時接收 CSI 與 HSB 兩條路徑的感測器資料，設計一個 buffer pool 管理策略：兩條路徑的 buffer 深度、格式與 GPU 記憶體預算如何規劃？</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-04.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 4 · 平台相機框架與驅動</div></a>
     <a class="np-next" href="unit-06.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 6 · Sensor Bring-up 與除錯</div></a>

@@ -190,6 +190,54 @@ SNR = 20·log10(1000/43.6) ≈ 27 dB
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>13.18 進階真實情境 Worked Example：長時間運作的 dark current 漂移</h2>
+  <p>場景：Thor T5000 搭載在戶外監控站，OV9281 24 小時不間斷運作。白天溫度 25°C、夜晚降至 5°C。目標：全天候穩定 SNR ≥ 28 dB。</p>
+  <div class="demo-block"><div class="demo-label">dark current 溫度補償</div><pre><span class="hl-c"># dark current 模型：</span>
+<span class="hl-c"># DC(T) = DC_25 × 2^((T-25)/10)</span>
+<span class="hl-c"># DC_25 = 10 e⁻/s（25°C 基準）</span>
+
+<span class="hl-c"># 白天 25°C：</span>
+DC = 10 e⁻/s × 曝光 8.3 ms = 0.083 e⁻（可忽略）
+
+<span class="hl-c"># 正午 45°C（陽光直射機殼）：</span>
+DC = 10 × 2^((45-25)/10) = 10 × 4 = 40 e⁻/s
+DC_8.3ms = 0.33 e⁻（仍可忽略）
+
+<span class="hl-c"># 但若長曝光（如夜間 100 ms）：</span>
+DC = 40 × 0.1 = 4 e⁻（開始有影響）
+SNR 影響：4 e⁻ 佔 full well 10000 的 0.04%（微小但累積）
+
+<span class="hl-c"># 真正問題：溫度漂移造成的 black level 變化</span>
+<span class="hl-c"># 25°C → 45°C：black level 從 64 漂移到 68（+4 code）</span>
+<span class="hl-c"># → OB 校正若不跟隨溫度 → 後續 AWB/LSC 偏移</span>
+
+<span class="hl-c"># 解決方案：</span>
+<span class="hl-c"># 1. 加入溫度感測器（感測器內建或外掛）</span>
+<span class="hl-c"># 2. 每 10 分鐘重新量測 black level</span>
+<span class="hl-c"># 3. 動態更新 OB 校正值</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>戶外 24h 運作的首要敵人不是雜訊本身而是「雜訊的不穩定」。black level 隨溫度漂移是隱藏殺手——必須用溫度回饋做動態 OB 校正。</div>
+
+  <h2>13.19 深入原理擴充：temporal NR 的運動偵測閾值</h2>
+  <p>temporal NR 依前後幀的差異判斷「哪些是雜訊、哪些是運動」。差異小於閾值 → 認為雜訊並平均壓制；差異大於閾值 → 認為運動並保留。閾值設定太高會讓雜訊通過；太低會讓運動物體留下殘影。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>在 slow-moving 場景中（例如旋轉的風扇叶片），temporal NR 可能把慢速移動的物體當成雜訊壓制，造成「靜止區域正常、慢動區域模糊」。這在機器人視覺中特別危險——SLAM 特徵點可能被 NR 抹除。解決方案是根據場景運動速度動態調整 temporal NR 閾值。</div>
+
+  <h2>13.20 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>夜間畫面雜訊明顯增加但白天正常</td><td>低光下 gain 提高，read noise 被放大</td><td>用 SNR 預算量化：計算夜間的 gain 上限，超過則補光</td></tr>
+  <tr><td>DPC 開啟後仍有固定亮點</td><td>DPC threshold 設定過低，未偵測到該缺陷</td><td>提高 DPC threshold；或用手動缺陷像素表補充</td></tr>
+  <tr><td>temporal NR 在動態場景產生殘影</td><td>NR temporal 閾值過低，慢速運動被壓制</td><td>提高 temporal NR threshold；或根據場景運動速度動態調整</td></tr>
+  <tr><td>空間 NR 開太強導致邊緣模糊</td><td>spatial NR 強度過高，把邊緣當雜訊</td><td>降低 spatial NR strength；確保 sharpen 在 NR 之後</td></tr>
+  <tr><td>長時間運作後 black level 漂移導致色彩偏移</td><td>溫度變化造成 dark current 變化</td><td>加入溫度感測器，動態更新 OB 校正值</td></tr>
+  </table>
+
+  <h2>13.21 進階挑戰題</h2>
+  <ol>
+  <li>設計一個 24 小時 dark current 監控系統：每 10 分鐘記錄溫度、black level 與 hot pixel 數。畫出三者的時序圖，找出「black level 漂移 > 2 code」的溫度門檻。</li>
+  <li>分析 temporal NR 在三種場景下的表現：靜止、慢速移動（0.5 pixel/frame）、快速移動（10 pixel/frame）。設計一個自動化測試：用旋轉平台模擬不同速度，量測 NR 的殘影程度與 SNR 改善。</li>
+  <li>設計一個 DPC + NR 的聯合校正策略：先用 20 張暗場建立缺陷像素表（DPC），再用 SNR 量測驗證 DPC 先做 vs NR 先做的差異。畫出兩種順序的 SNR 對照表。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-12.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 12 · 鏡頭陰影校正（LSC）</div></a>
     <a class="np-next" href="unit-14.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 14 · 清晰度、動態範圍與調校工作流</div></a>

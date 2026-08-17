@@ -108,6 +108,47 @@
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>1.9 進階真實情境 Worked Example：自駕無人車六鏡頭 HSB 接入</h2>
+  <p>場景：一台自駕實驗車搭載 Thor T5000，車身前後左右共 6 顆 OV5640（5 MP、RAW10、30 fps），全部走 HSB（25GbE）接入 Thor，Holoscan 管線即時融合成環景。</p>
+  <div class="demo-block"><div class="demo-label">頻寬規劃與 Holoscan 通道配置</div><pre>每顆 OV5640：2592×1944 × 10 bit × 30 fps ≈ 1.50 Gbps
+6 顆總計：≈ 9.0 Gbps
+25GbE 裸速 25 Gbps → 保留 50% overhead → 可用 ≈ 12.5 Gbps
+9.0 < 12.5 → 可行
+
+Holoscan 配置：
+  SensorSourceOp × 6（每顆獨立 channel）
+  PreprocessOp（resize + format 轉換，GPU）
+  FusionOp（六路拼接 / 立體匹配）
+  InferenceOp（物件偵測 / 語義分割）
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 選 HSB 而非 CSI：6 顆感測器分布在車身，走乙太網路省布線、抗干擾</span>
+<span class="hl-c"># 2. 每顆獨立 I2C 橋接通道：避免多顆共用 I2C 的 address 衝突風險</span>
+<span class="hl-c"># 3. PTP（IEEE 1588）同步六路曝光時間戳：確保車速 60 km/h 時幀間距差 < 0.5 ms</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>HSB 讓感測器物理距離不受 CSI 30cm 限制，但必須處理乙太網路的非確定性延遲。實務上用 PTP 硬體時間戳 + Holoscan 的 synchronizer operator 做時間對齊，而非依賴封包抵達順序。</div>
+
+  <h2>1.10 深入原理擴充：Thor T5000 多媒體子系統與 OFI 架構</h2>
+  <p>Thor T5000 的多媒體引擎不只是 ISP。它整合了 <strong>NVDEC 8th generation</strong>（硬體解碼器，支援 H.265/AV1 多流解碼）、<strong>NVENC</strong>（硬體編碼）、<strong>OFI（Optical Flow Engine）</strong> 與 ISP。OFI 能在硬體層面輸出每像素光流向量，讓物理 AI 管線在不佔 GPU 的情況下取得運動資訊。</p>
+  <div class="pipe"><span class="step">感測器資料</span><span class="arr">→</span><span class="step">Camera Offload Engine</span><span class="arr">→</span><span class="step">ISP / OFI / NVDEC</span><span class="arr">→</span><span class="step">GPU（CUDA/推理）</span></div>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>NVDEC 8th gen 在同時解碼 > 4 路 4K 時，與 ISP 共享記憶體頻寬。若 ISP 管線同時處理多顆高解析度感測器，NVDEC 吞吐可能下降 10–15%。規劃多感測器 + 影片解碼的混合管線時，必須量測「ISP 活動時」的 NVDEC 效能，而非只看單獨基準測試。</div>
+
+  <h2>1.11 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>HSB 有 link up 但 Holoscan 收不到資料</td><td>I2C 橋接通道未建立 / 感測器未啟動輸出</td><td>用 i2cdetect 確認橋接通道；確認感測器 register 設定正確後重新觸發 streaming</td></tr>
+  <tr><td>多顆感測器中有一顆偶發掉幀</td><td>25GbE 頻寬不足或 PCIe bus 競爭</td><td>降低該感測器 fps；檢查 host 端 buffer queue 深度；用 ethtool 檢查網路 drop 計數</td></tr>
+  <tr><td>CSI-2 接單顆感測器正常，接兩顆後畫面撕裂</td><td>Lane 數分配錯誤或 DTB overlay 未更新</td><td>確認每顆感測器的 lane 數設定正確；重新產生 DTB overlay 並驗證 media graph</td></tr>
+  <tr><td>camera offload engine 後畫面時間戳跳號</td><td>offload engine buffer 溢位或 DMA 對齊錯誤</td><td>dmesg 檢查 buffer overflow 警告；確認 DMA stride 與感測器 mode 匹配</td></tr>
+  <tr><td>USB 相機在 Thor 上比 CSI 慢 3 幀延遲</td><td>USB 匯流排排程 + 驅動層 buffer 佇列</td><td>改用 CSI 或 HSB 以降低延遲；若必須用 USB，降低解析度以減少 USB transfer 時間</td></tr>
+  </table>
+
+  <h2>1.12 進階挑戰題</h2>
+  <ol>
+  <li>規劃一個 Thor T5000 + 4 顆 8MP 感測器（RAW12、24 fps）的 HSB 頻寬預算。考慮封包 overhead、PCIe 3.0 x4 瓶頸與 Holoscan buffer 需求，寫出完整的頻寬計算過程與結論。</li>
+  <li>設計一個實驗：在 Thor 上同時使用 CSI 與 HSB 兩條路徑接同一型號感測器，比較兩者的從 trigger 到 Holoscan operator 輸出的端到端延遲。說明你會用什麼工具量測、控制哪些變數。</li>
+  <li>若 NVDEC 8th gen 與 ISP 同時處理 6 路 4K 影像串流，預估 GPU 可用頻寬下降比例，並提出一個 Holoscan 管線架構讓 OFI 在不爭搶 GPU 記憶體的情況下運作。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="index.html"><div class="np-label">← 上一層</div><div class="np-name">單元教學目錄</div></a>
     <a class="np-next" href="unit-02.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 2 · 影像感測器基礎</div></a>

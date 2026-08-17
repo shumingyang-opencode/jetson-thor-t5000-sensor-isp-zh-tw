@@ -117,6 +117,44 @@ Gamma：code 經過非線性 → 128（8-bit 輸出）
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>7.9 進階真實情境 Worked Example：多感測器 ISP 管線的統計衝突</h2>
+  <p>場景：Thor T5000 同時處理 3 顆感測器（前視 8MP + 左右側視 2MP），每顆的 ISP 統計獨立計算 AE/AWB。左側視感測器朝向逆光窗戶，AE 統計被強光主導，導致整體曝光策略錯誤。</p>
+  <div class="demo-block"><div class="demo-label">多感測器 AE 統計隔離</div><pre><span class="hl-c"># 問題：3 顆感測器共享同一 ISP 統計引擎</span>
+<span class="hl-c"># 左側視逆光 → AE 計算出「場景很亮」→ 降低曝光</span>
+<span class="hl-c"># → 前視感測器跟著變暗 → 前方物件欠曝</span>
+
+<span class="hl-c"># 解決方案：per-sensor AE ROI 設定</span>
+<span class="hl-c"># 1. 每顆感測器的 AE 統計範圍獨立設定（不跨 sensor）</span>
+<span class="hl-c"># 2. 前視感測器的 AE 目標獨立於側視</span>
+<span class="hl-c"># 3. 或使用 Holoscan 的統計隔離 operator，每路 ISP 管線各自有獨立 AE 閉迴路</span>
+
+<span class="hl-c"># 驗證：</span>
+<span class="hl-c"># 固定前視曝光為手動，觀察側視曝光自動調整是否影響前視</span>
+<span class="hl-c"># 若不受影響 → 統計隔離成功</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>多感測器系統的 ISP 統計必須隔離。NVIDIA ISP 的預設行為是「每顆感測器獨立 AE/AWB」，但若共享同一 ISP 硬體 instance，統計可能互相干擾。解法是確認每路 ISP pipeline 有獨立的統計引擎，或在 Holoscan 層做統計隔離。</div>
+
+  <h2>7.10 深入原理擴充：NVIDIA ISP 的 multi-pass pipeline 與 Blackwell 架構</h2>
+  <p>Thor 的 Blackwell ISP 支援 <strong>multi-pass processing</strong>：同一幀資料可以通過 ISP 管線多次，每次套用不同的參數集。例如第一 pass 做基礎色彩校正（CCM + AWB），第二 pass 做局部 tone mapping。這在 HDR 場景中特別有用——第一 pass 計算動態範圍，第二 pass 針對高光/暗部分別映射。</p>
+  <div class="pipe"><span class="step">RAW</span><span class="arr">→</span><span class="step">Pass 1：OB + LSC + Demosaic + CCM</span><span class="arr">→</span><span class="step">Pass 2：Local TM + NR + Sharpen</span><span class="arr">→</span><span class="step">輸出</span></div>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>multi-pass 模式下，第一 pass 輸出的統計值可能與單 pass 不同（因為某些 block 被延到第二 pass）。若 AE/AWB 演算法以第一 pass 的統計為準但實際色彩在第二 pass 才校正，收斂可能偏移。必須在 tuning 時確認 AE/AWB 的統計取樣點位於管線的哪一個 pass。</div>
+
+  <h2>7.11 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>輸出影像整體偏綠但 RAW 四通道正常</td><td>CCM 矩陣未套用或 CCM 色溫分段切換錯誤</td><td>確認 CCM 輸入色溫是否與實際光源匹配；用手動 AWB 固定色溫後重試</td></tr>
+  <tr><td>AE 收斂後畫面仍過暗</td><td>AE 目標亮度設定過低 / 統計 ROI 遮蔽主體</td><td>調整 AE target brightness；確認統計 ROI 覆蓋主要場景區域</td></tr>
+  <tr><td>低光場景中 NR 開啟後畫面模糊</td><td>空間 NR 強度過高，把細節當雜訊抹除</td><td>降低 spatial NR strength；確認 sharpen 在 NR 之後才啟用</td></tr>
+  <tr><td>multi-pass ISP 的第二 pass 產生殘影</td><td>時間性 NR 在 multi-pass 間的幀緩衝未清除</td><td>確認 temporal NR 的幀緩衝在 multi-pass 切換時正確重置</td></tr>
+  <tr><td>ISP 輸出的 histogram 與 RAW histogram 不一致</td><td>gamma/tone mapping 在兩者之間改變了亮度分布</td><td>比較時必須在同一階段（RAW vs RAW，或 sRGB vs sRGB）</td></tr>
+  </table>
+
+  <h2>7.12 進階挑戰題</h2>
+  <ol>
+  <li>設計一個 multi-pass ISP 的調校策略：如何在 Pass 1（基礎色彩）與 Pass 2（tone mapping + NR）之間分配調校參數？若 Pass 1 的 CCM 錯誤，Pass 2 的 NR 強度是否需要跟著調整？</li>
+  <li>在多感測器（3 顆）系統中，畫出每路 ISP 管線的統計流向圖。標出哪些統計值共享、哪些獨立。分析「左側逆光」如何影響前視 AE，並提出一個 Holoscan 層的統計隔離方案。</li>
+  <li>分析 NVIDIA ISP 的 OB（Optical Black）扣除在不同溫度下的穩定性。設計一個實驗：在 25°C 與 65°C 下量測 OB 飄移量，並說明它對後續 LSC/AWB 校正的連鎖影響。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-06.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 6 · Sensor Bring-up 與除錯</div></a>
     <a class="np-next" href="unit-08.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 8 · RAW 擷取與資料格式</div></a>

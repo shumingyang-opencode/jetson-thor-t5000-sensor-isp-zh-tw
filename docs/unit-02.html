@@ -120,6 +120,45 @@
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>2.10 進階真實情境 Worked Example：高溫 industrial vision 的 full well 瓶頸</h2>
+  <p>場景：Thor T5000 搭載在鋼鐵廠 24 小時連續運作的瑕疵偵測站。感測器為 OV9281 global shutter，環境溫度 55°C，感測器表面溫度可達 70°C。目標：穩定 SNR ≥ 30 dB。</p>
+  <div class="demo-block"><div class="demo-label">高溫 full well 衰減分析</div><pre>室溫（25°C）full well = 10000 e⁻，dark current = 10 e⁻/s
+高溫（70°C）dark current 乘以 ~10 倍 → 100 e⁻/s
+曝光 8.3 ms（120 fps）→ dark current 貢獻 = 0.8 e⁻（可忽略）
+但 70°C 時 full well 衰減至 ~8500 e⁻（約 85%）
+
+QE = 60%，平均像素接收 5000 光子：
+  電子數 = 5000 × 0.6 = 3000 e⁻
+  飽和比例 = 3000 / 8500 = 35.3%（比室溫 30% 稍高）
+  SNR = 20·log10(3000 / √3000) ≈ 34.8 dB ✓
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 高溫讓 full well 下降 → 飽和門檻提前 → 必須降低曝光避免 clip</span>
+<span class="hl-c"># 2. dark current 增加但在短曝光下可忽略 → 主要瓶頸是 full well 不是 dark current</span>
+<span class="hl-c"># 3. 加散熱片把感測器降回 55°C → full well 恢復至 ~9200 e⁻ → SNR 提升 1.5 dB</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>高溫 industrial 環境的首要敵人不是 dark current 而是 full well 衰減。解決方案是散熱而非提高增益——增益只放大雜訊，散熱才增加真正的動態範圍。</div>
+
+  <h2>2.11 深入原理擴充：OV9281 的 dual-gain 架構與 HDR 模式</h2>
+  <p>OV9281 支援 <strong>dual-gain readout</strong>：同一幀中以兩種增益分別讀出，再由後端合成高動態範圍。低增益通道保留高光細節、高增益通道保留暗部。這在 global shutter 感測器中是珍貴的能力，因為 rolling shutter HDR 通常需要多次曝光（運動場景不適用）。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>dual-gain HDR 模式下，每幀有效像素數減半（兩通道交錯排列）。若後端 ISP 不知道 sensor 處於 dual-gain 模式，demosaic 會把交錯排列當成正常 Bayer → 產生彩色摩爾紋。必須在 DTB 與 ISP 設定中同步標記 sensor mode 為 dual-gain。</div>
+
+  <h2>2.12 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>暗部有明顯紫色/綠色斑點</td><td>bit depth 不足導致暗部量化斷階</td><td>切換至更高 bit depth sensor mode（10-bit → 12-bit）；或提高 analog gain 使暗部落入有效範圍</td></tr>
+  <tr><td>白卡 RAW 四通道比例正常但輸出偏色</td><td>Bayer order 正確但 CCM 矩陣未套用</td><td>確認 ISP 管線中 CCM 區塊是否啟用（unit-07）；用手動 AWB + 灰卡驗證感測器本身色彩</td></tr>
+  <tr><td>高溫環境下偶發過曝</td><td>full well 隨溫度下降，原本安全的曝光量變成飽和</td><td>加入溫度感測回饋，在 AE 中設定溫度補償表；或限制最大曝光為 high-temp 值</td></tr>
+  <tr><td>Rolling shutter 感測器拍移動物體有果凍效應</td><td>逐列曝光時間差造成幾何扭曲</td><td>改用 global shutter 感測器（如 OV9281）；或縮短曝光時間、提高補光</td></tr>
+  <tr><td>dual-gain HDR 輸出有規律彩紋</td><td>ISP 未設定 dual-gain 模式，Bayer 解析錯位</td><td>在 DTB 標記 sensor mode 為 dual-gain；確認 ISP demosaic 支援交錯 Bayer</td></tr>
+  </table>
+
+  <h2>2.13 進階挑戰題</h2>
+  <ol>
+  <li>設計一個實驗：在 25°C 和 65°C 兩個溫度下，量測 OV9281 的 full well、dark current 與 read noise。畫出三者隨溫度變化的曲線，並找出你的感測器「不可接受 SNR」的溫度門檻。</li>
+  <li>若你的專案需要在 30 fps 下同時使用 dual-gain HDR 與 global shutter，分析 ISP 管線中的 demosaic 區塊需要哪些特殊處理，並提出一個避免彩紋的 ISP 配置方案。</li>
+  <li>以 OV9281 為例，說明如何從 RAW 檔的 histogram 中區分「shot noise 主導」與「read noise 主導」的區域，並設計一個自動判定腳本。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-01.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 1 · 平台相機生態總覽</div></a>
     <a class="np-next" href="unit-03.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 3 · 感測器通訊介面</div></a>

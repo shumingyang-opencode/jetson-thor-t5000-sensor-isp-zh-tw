@@ -138,6 +138,55 @@ Thor：分開驗證 CSI/HSB source → 固定 Holoscan source format → 查 ISP
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>9.12 進階真實情境 Worked Example：從 RPi5 到 Thor 的完整調校移植</h2>
+  <p>場景：團隊在 RPi5 上已建立完整的 OV9281 調校參數（AWB gains 表、LSC 網格、NR 強度），要移植到 Thor T5000。RPi5 用 libcamera（開源 ISP），Thor 用 NVIDIA ISP。</p>
+  <div class="demo-block"><div class="demo-label">跨平台調校移植 SOP</div><pre><span class="hl-c"># Phase 1：感測器層（可移植）</span>
+<span class="hl-c"># OV9281 的 register 設定（曝光、增益、init table）→ 直接搬</span>
+<span class="hl-c"># 驗證：讀回 register 確認值一致</span>
+
+<span class="hl-c"># Phase 2：ISP 層（不可直接搬，需重校）</span>
+<span class="hl-c"># RPi5 的 libcamera tuning JSON → 語義不同 → 不能直接套</span>
+<span class="hl-c"># 重校順序：黑位 → LSC → AWB/CCM → NR → Sharpen</span>
+
+<span class="hl-c"># Phase 3：驗證對照</span>
+<span class="hl-c"># 同一灰卡、同一光源、同一 sensor mode</span>
+<span class="hl-c"># 比較 RPi5 與 Thor 的 RAW histogram、YUV histogram、SNR</span>
+<span class="hl-c"># 差異量 > 10% → 重校；< 10% → 可接受</span>
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 感測器 register 100% 可移植（OV 感測器不因平台而異）</span>
+<span class="hl-c"># 2. ISP 參數 0% 可移植（不同 ISP 引擎語義不同）</span>
+<span class="hl-c"># 3. 可攜的是「校正流程與量測指標」，不是具體參數值</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>跨平台移植的核心不是「搬參數」而是「搬流程」。把 RPi5 的校正 SOP（拍灰卡、量測、建表）搬到 Thor，用相同的 SOP 重新產出 Thor 專用的參數——這才是正解。</div>
+
+  <h2>9.13 深入原理擴充：四平台 ISP 的 latency profile</h2>
+  <p>除了調校能力，四平台的 ISP latency（從感測器輸出到 ISP 輸出的延遲）也不同。RPi5 的 libcamera ISP 在 CPU 上運行，latency ~15 ms；Orin/Thor 的 NVIDIA ISP 在硬體引擎上運行，latency ~2–4 ms。但這只是 ISP 本身的延遲——完整管線還包括 DMA、buffer queue 與後處理。</p>
+  <table>
+  <tr><th>平台</th><th>ISP latency（估算）</th><th>完整管線 latency</th><th>瓶頸</th></tr>
+  <tr><td>RPi5</td><td>~15 ms</td><td>~25–35 ms</td><td>CPU + ISP 共用運算資源</td></tr>
+  <tr><td>Orange Pi</td><td>~5 ms（內建 ISP）</td><td>~15–20 ms</td><td>ISP 功能受限</td></tr>
+  <tr><td>Orin Nano</td><td>~2–3 ms</td><td>~8–12 ms</td><td>DMA + buffer queue</td></tr>
+  <tr><td>Thor T5000</td><td>~2–4 ms</td><td>~5–8 ms</td><td>HSB 網路延遲（若有）</td></tr>
+  </table>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>Thor 的 ISP latency 雖低，但若 Holoscan 管線中混入 CPU callback（例如 Python preprocessor），整體管線 latency 可能暴增至 20 ms 以上。latency profile 必須量測「完整管線」而非只量 ISP。</div>
+
+  <h2>9.14 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>RPi5 調校搬到 Thor 後整體偏暗</td><td>AE 目標亮度語義不同（RPi5 用 histogram percentile，Thor 用平均值）</td><td>重新設定 Thor 的 AE target brightness；用灰卡量測對照</td></tr>
+  <tr><td>RPi5 的 LSC 網格搬到 Thor 後暗角未改善</td><td>LSC 網格格式與 ISP 插值方式不同</td><td>用 Thor 專用工具重新拍灰卡校正 LSC</td></tr>
+  <tr><td>同感測器在 Orin 與 Thor 上 FPS 不同</td><td>sensor mode 的 frame length 設定差異</td><td>確認兩平台的 DTB 中 frame length 與 line length 一致</td></tr>
+  <tr><td>RPi5 的 tuning JSON 直接套入 Thor 無效</td><td>libcamera JSON 與 NVIDIA tuning 格式語義不同</td><td>不套用 JSON；用 Thor 專用工具重新建立 tuning 資料</td></tr>
+  <tr><td>Orange Pi 的感測器內建 ISP 已做 NR，Thor 再做一次 NR 導致過度模糊</td><td>雙重 NR 處理</td><td>確認感測器 ISP 狀態（開/關）；若已開 NR，Thor 端 NR 強度降低</td></tr>
+  </table>
+
+  <h2>9.15 進階挑戰題</h2>
+  <ol>
+  <li>建立四平台的 latency profile 量測方法：用高速相機（> 1000 fps）同時拍攝感測器輸出 LED 指示燈與顯示器輸出，計算端到端延遲。畫出四平台的 latency 對照柱狀圖。</li>
+  <li>設計一個「可攜調校指標」系統：不依賴平台特定的 tuning 格式，而是用 RAW histogram、SNR、色彩 ΔE 與 latency 四個指標定義「好影像」。寫成一份跨平台驗證腳本。</li>
+  <li>分析 Thor 的 HSB 路徑在 latency 上比 CSI 多出的延遲來源（網路封包、橋接、PCIe），並設計一個優化方案讓 HSB latency 接近 CSI。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-08.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 8 · RAW 擷取與資料格式</div></a>
     <a class="np-next" href="unit-10.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 10 · 曝光與自動曝光（AE）</div></a>

@@ -161,6 +161,53 @@ gain_B  = 780 / 560 = 1.393
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>12.18 進階真實情境 Worked Example：多感測器 LSC 獨立校正</h2>
+  <p>場景：Thor T5000 接 3 顆 OV9281（前視 + 左右側視），每顆搭配不同鏡頭（前視 2.8mm 廣角、側視 6mm 標準）。三顆的 lens shading 特性完全不同。</p>
+  <div class="demo-block"><div class="demo-label">三顆感測器的 LSC 校正流程</div><pre><span class="hl-c"># 前視（2.8mm 廣角）：</span>
+<span class="hl-c"># 視場角 120°，θ_max = 60°，cos⁴(60°) = 0.0625</span>
+<span class="hl-c"># → 角落 gain 最高可達 16x（非常大）</span>
+<span class="hl-c"># → 雜訊在角落被嚴重放大</span>
+<span class="hl-c"># → 限制最大 gain ≤ 4x，接受角落 slight 暗角</span>
+
+<span class="hl-c"># 左/右側視（6mm 標準）：</span>
+<span class="hl-c"># 視場角 50°，θ_max = 25°，cos⁴(25°) = 0.67</span>
+<span class="hl-c"># → 角落 gain ≈ 1.49x（合理範圍）</span>
+<span class="hl-c"># → LSC 全補償，無雜訊放大問題</span>
+
+<span class="hl-c"># 校正流程：</span>
+1. 三顆各自拍灰卡（同一光源、同一亮度）
+2. 各自產生 LSC 網格（格式相同、參數不同）
+3. 前視 LSC 限制最大 gain（防角落雜訊爆）
+4. 側視 LSC 正常全補償
+5. 驗證：拍均勻灰卡，三顆的四角亮度差 < 5%
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 每顆感測器 + 鏡頭組合必須獨立校正——不能共用</span>
+<span class="hl-c"># 2. 廣角鏡頭的 LSC gain 要設上限——否則角落 SNR 崩壞</span>
+<span class="hl-c"># 3. LSC 網格密度要夠高——廣角鏡頭的 shading 變化更快</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>多感測器系統的 LSC 是「每顆獨立」的。廣角鏡頭的 LSC gain 過高是品質隱患——限制最大 gain 並接受 slight 暗角，比讓角落雜訊爆炸更明智。</div>
+
+  <h2>12.19 深入原理擴充：LSC 與 NR 的交互作用</h2>
+  <p>LSC 在 ISP 管線中位於 NR 之前（unit-07 管線順序）。這代表：LSC 增益會先放大角落的雜訊，然後 NR 再嘗試壓制。若 LSC 增益過高（> 4x），NR 可能把放大後的雜訊當成「正常」訊號而保留，造成角落「有雜訊但 NR 沒完全壓制」的尷尬狀態。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若 LSC 網格過粗（例如 4×4），網格節點間的插值誤差會在影像上產生「棋盤格」或「光暈」效應。這在低光場景特別明顯（因為 LSC 增益高、插值誤差也被放大）。提高網格密度（16×16 或 32×32）可改善，但要與校正圖品質取捨。</div>
+
+  <h2>12.20 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>LSC 開啟後角落反而更暗</td><td>LSC 網格的增益方向搞反（衰減變放大）</td><td>檢查網格增益值：角落應 > 1.0（補償衰減）；若 < 1.0 → 方向反了</td></tr>
+  <tr><td>換鏡頭後 LSC 效果變差但網格未更新</td><td>LSC 是「鏡頭+感測器」組合特有</td><td>換鏡頭後必須重新拍灰卡校正 LSC 網格</td></tr>
+  <tr><td>廣角鏡頭的 LSC 開啟後角落雜訊明顯增加</td><td>LSC gain 過高（> 4x），放大了角落雜訊</td><td>限制 LSC 最大 gain；或在 LSC 後增強角落 NR 強度</td></tr>
+  <tr><td>LSC 網格在低光場景產生棋盤格效應</td><td>網格過粗 + 增益高 → 插值誤差被放大</td><td>提高網格密度（32×32）；或用更平滑的插值方法</td></tr>
+  <tr><td>只校正亮度不分通道導致角落偏色</td><td>Color shading 需要 R/Gr/Gb/B 各自網格</td><td>重新拍灰卡，分四通道各產生獨立 LSC 網格</td></tr>
+  </table>
+
+  <h2>12.21 進階挑戰題</h2>
+  <ol>
+  <li>設計一個 LSC 與 NR 的聯合調校策略：在不同 LSC max gain 限制下，量測角落的 SNR 與 NR 保留率。找出「LSC gain vs 角落品質」的最佳甜蜜點。</li>
+  <li>比較 4×4、16×16 與 32×32 三種 LSC 網格密度在廣角鏡頭（120°）下的效果。量測暗角殘留、棋盤格可見度與雜訊放大，畫出三者的 trade-off 曲線。</li>
+  <li>設計一個自動化 LSC 校正腳本：自動拍灰卡（多張取平均）、分通道計算增益網格、限制最大 gain、平滑處理，並輸出 ISP 可直接載入的 LSC 格式。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-11.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 11 · 白平衡與色彩（AWB/CCM）</div></a>
     <a class="np-next" href="unit-13.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 13 · 雜訊與降噪</div></a>

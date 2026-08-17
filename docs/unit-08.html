@@ -161,6 +161,53 @@ EOF</pre></div>
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>8.19 進階真實情境 Worked Example：HSB 路徑的 RAW 解包完整性驗證</h2>
+  <p>場景：Thor T5000 透過 HSB 接 OV9281（1280×800 RAW10 @ 120 fps），Holoscan 解包後取 RAW。取到的 RAW 有規律的彩色條紋，但同一顆感測器走 CSI 直接取流時正常。</p>
+  <div class="demo-block"><div class="demo-label">HSB RAW 解包分析</div><pre><span class="hl-c"># 問題定位：</span>
+<span class="hl-c"># CSI 直取 RAW 正常 → 感測器輸出正確</span>
+<span class="hl-c"># HSB 取 RAW 有條紋 → 解包/封包層問題</span>
+
+<span class="hl-c"># 分析步驟：</span>
+1. 比較 CSI 與 HSB 兩路 RAW 的前 10 bytes
+   → HSB 多了 4 bytes 的 packet header
+   → 原始解包未剝離 header → 第一列像素錯位 4 bytes
+
+2. 驗證 stride：
+   CSI：bytesperline = 1280 × 10/8 = 1600
+   HSB：bytesperline = 1600 + 4（header）= 1604
+   <span class="hl-c"># 若用 CSI 的 stride 讀 HSB 的 RAW → 每列累積錯位</span>
+
+3. 修正方案：
+   <span class="hl-c"># 在 Holoscan SensorSourceOp 中設定 header_offset = 4</span>
+   <span class="hl-c"># 或用 V4L2 的 V4L2_BUF_DATA_FORMAT 設定 header size</span>
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. HSB 與 CSI 的 RAW 格式差異在封包 header——內容相同、包裝不同</span>
+<span class="hl-c"># 2. 解包時必須先剝離 header，再用 sensor mode 的 stride 進行解析</span>
+<span class="hl-c"># 3. 標準做法：用 V4L2 query 回讀 bytesperline，而非自行假設</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>HSB 與 CSI 的 RAW 差異「只在封包層」但「後果在像素層」。解法是永遠從 driver/device query 回讀 stride 和 header size，而不是假設「感測器 mode 相同就一切相同」。</div>
+
+  <h2>8.20 深入原理擴充：RAW12 packing 與多感測器的 stride 互斥</h2>
+  <p>RAW10 是 4 bytes 裝 5 pixels，RAW12 則是 3 bytes 裝 2 pixels（或 2 bytes 裝 1 pixel + padding）。在多感測器系統中，若 4 顆感測器使用不同的 RAW bit depth（例如前視 RAW12 + 側視 RAW10），每路的 stride 與 packing 規則不同，Holoscan 的 buffer pool 必須為每路維護獨立的 unpack 設定。</p>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若 Holoscan 的 buffer pool 誤用 RAW12 的 unpack 函式去解 RAW10 資料，解出來的像素值會有 2-bit 的系統性偏移（最大可達 3 倍亮度差）。這種錯誤在灰卡上不明顯（因為亮度均勻），但在色彩豐富的場景會產生不可預期的色帶。務必為每路感測器指定正確的 unpack 設定。</div>
+
+  <h2>8.21 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>RAW 第一列正常、第二列起逐漸錯位</td><td>stride/pitch 設定不包含 padding bytes</td><td>回讀 V4L2 的 bytesperline，確保 decoder 使用正確的 row stride</td></tr>
+  <tr><td>HSB RAW 有 5-pixel 為一組的規律條紋</td><td>RAW10 packing 未正確解包</td><td>確認 unpack 函式符合 MIPI CSI-2 的 RAW10 packing 規範；驗證黑位應為固定常數</td></tr>
+  <tr><td>同一感測器 CSI 取 RAW 正常但 HSB 取 RAW 有彩色條紋</td><td>HSB 封包 header 未剝離</td><td>在 Holoscan SensorSourceOp 設定 header_offset；或用 V4L2 query 回讀</td></tr>
+  <tr><td>RAW 位元深搞混（10-bit 當 16-bit 讀）導致亮度差 64 倍</td><td>container 大小 vs 有效位元所在 bit 未確認</td><td>確認有效位元在 container 的哪個 bit（左移 6 bit 或右對齊）；用黑位值驗證</td></tr>
+  <tr><td>多感測器中某路的 RAW packing 設定被其他路覆蓋</td><td>Holoscan buffer pool 未為每路維護獨立設定</td><td>為每路感測器建立獨立的 unpack 設定；避免共用全域 buffer pool 設定</td></tr>
+  </table>
+
+  <h2>8.22 進階挑戰題</h2>
+  <ol>
+  <li>設計一個 RAW 完整性自動化測試腳本：對同一 sensor mode 分別用 CSI 與 HSB 取 RAW，自動比較前 100 bytes、stride、header size 與黑位值，輸出差異報告。</li>
+  <li>若你的專案需要同時處理 RAW10（2 顆 OV9281）與 RAW12（1 顆 OV5640），設計一個 Holoscan buffer pool 架構：每路的 unpack 設定如何管理？pool 總大小如何計算？</li>
+  <li>從 CSI bit rate、packet header、lane 分配與 DMA 對齊四個層級，分別解釋「raw bitrate 正確」仍可能導致 RAW 條紋的所有可能原因。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-07.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 7 · ISP 管線深入</div></a>
     <a class="np-next" href="unit-09.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 9 · 各平台 ISP 架構差異</div></a>

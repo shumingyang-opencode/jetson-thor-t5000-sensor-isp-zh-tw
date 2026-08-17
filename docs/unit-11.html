@@ -162,6 +162,48 @@ gB = 510 / 400 = 1.275
     <li><a href="../learning-path.html">學習路線</a>：複習全站</li>
   </ul>
 
+  <h2>11.18 進階真實情境 Worked Example：混合色溫下的 AWB 策略</h2>
+  <p>場景：Thor T5000 搭載在手術機器人上，手術室同時有日光燈（5000K）與手術燈（4000K 暖色）。AWB 需要在兩種色溫之間找到平衡，不讓手術區域偏色。</p>
+  <div class="demo-block"><div class="demo-label">手術室 AWB 策略</div><pre><span class="hl-c"># 問題：全畫面 AWB 被大面積日光燈主導 → 手術燈區域偏暖</span>
+<span class="hl-c"># 或被手術燈主導 → 日光燈區域偏冷</span>
+
+<span class="hl-c"># 方案：ROI-based AWB</span>
+<span class="hl-c"># 1. 定義兩個 AWB ROI：</span>
+<span class="hl-c">#    ROI_A（手術區域）：優先級高，色溫目標 4000K</span>
+<span class="hl-c">#    ROI_B（背景）：優先級低，色溫目標 5000K</span>
+<span class="hl-c"># 2. ISP 統計分別計算兩個 ROI 的 R/G、B/G 比例</span>
+<span class="hl-c"># 3. 最終 gains = 加權平均（ROI_A 權重 0.7、ROI_B 權重 0.3）</span>
+
+<span class="hl-c"># 驗證：拍 18% 灰卡放在手術區域，量測色彩 ΔE < 3（不可感知差異）</span>
+
+<span class="hl-c"># 設計決策：</span>
+<span class="hl-c"># 1. 手術場景對色彩精準度要求極高 → 必須用 ROI-based AWB</span>
+<span class="hl-c"># 2. ROI 與優先級必須手動定義（自動化無法理解「哪個區域重要」）</span>
+<span class="hl-c"># 3. CCM 必須在 AWB 收斂後才計算——AWB 與 CCM 有嚴格順序依賴</span></pre></div>
+  <div class="callout"><strong>設計決策：</strong>混合色溫場景的 AWB 不能用「全畫面平均」。ROI-based AWB 是唯一精準解法，但 ROI 定義需要場景知識——這是自動化無法取代工程判斷的地方。</div>
+
+  <h2>11.19 深入原理擴充：AWB 的色彩空間與 CCM 的數學</h2>
+  <p>CCM（Color Correction Matrix）是一個 3×3 矩陣，把感測器原生色域（device-dependent）映射到輸出色域（通常是 sRGB）。AWB gains 是「pre-CCM」的通道縮放，CCM 是「post-AWB」的色彩旋轉。兩者數學上不可交換——先 AWB 再 CCM ≠ 先 CCM 再 AWB。</p>
+  <div class="pipe"><span class="step">RAW (R,G,B)</span><span class="arr">→</span><span class="step">AWB gains (gR, gG, gB)</span><span class="arr">→</span><span class="step">CCM (3×3 matrix)</span><span class="arr">→</span><span class="step">Gamma</span><span class="arr">→</span><span class="step">sRGB output</span></div>
+  <div class="callout warn"><strong>容易忽略的邊界案例：</strong>若 CCM 是在日光（6500K）下量測的，但 AWB 把色溫調到 3000K（暖色），CCM 的色彩旋轉可能不再適用。專業相機的做法是為每個色溫段維護一組 CCM（color temperature interpolation），NVIDIA ISP 通常在內部做這件事。</div>
+
+  <h2>11.20 診斷式疑難排解表</h2>
+  <table>
+  <tr><th>症狀</th><th>可能原因</th><th>解決方案</th></tr>
+  <tr><td>灰卡上手動 AWB 正常但色卡特定色塊偏色</td><td>CCM 矩陣未正確校正 / 色溫分段切換錯誤</td><td>在固定色溫下拍色卡，量測 ΔE；重新校正 CCM</td></tr>
+  <tr><td>混合色溫場景中 AWB 不穩定（色溫來回跳動）</td><td>AWB ROI 設定不穩定 / 場景內容變動導致統計跳動</td><td>增加 AWB temporal smoothing；固定 ROI 或限制色溫變化範圍</td></tr>
+  <tr><td>AWB gains 方向搞反（應降 R 卻升了）</td><td>感測器 register 的 gains 定義是「乘在訊號上」vs「乘在 1/gain」</td><td>回讀 register 驗證方向；用灰卡實測 R/G/B 三通道變化</td></tr>
+  <tr><td>換光源後 AWB 需要 10 秒才收斂</td><td>AWB convergence speed 設定過慢 / 統計 ROI 遮蔽主光源</td><td>提高 AWB reaction speed；確認 ROI 覆蓋主光源區域</td></tr>
+  <tr><td>手術燈下白色物體偏黃</td><td>AWB 被手術燈色溫主導但 CCM 未針對該色溫校正</td><td>為手術燈色溫建立獨立的 CCM 校正值</td></tr>
+  </table>
+
+  <h2>11.21 進階挑戰題</h2>
+  <ol>
+  <li>設計一個手術室專用的 AWB + CCM 調校流程：定義 3 個色溫段（手術燈 4000K、日光燈 5000K、混合）的 CCM 校正值，並說明如何在 ISP 中做色溫段插值。</li>
+  <li>分析 AWB gains 的「反比定義」在不同感測器上的差異：以 OV9281 與 OV5640 為例，說明相同的灰卡 R/G/B 比例如何產出不同的 gains 值，並驗證你的計算。</li>
+  <li>設計一個混合色溫場景的量化評估指標：用 ΔE（色彩差異）在 5 個灰階級上測量，畫出色彩精準度的「色溫 vs ΔE」曲線，找出可接受的色溫範圍。</li>
+  </ol>
+
   <div class="next-prev">
     <a href="unit-10.html"><div class="np-label">← 上一篇</div><div class="np-name">單元 10 · 曝光與自動曝光（AE）</div></a>
     <a class="np-next" href="unit-12.html"><div class="np-label">下一篇 →</div><div class="np-name">單元 12 · 鏡頭陰影校正（LSC）</div></a>

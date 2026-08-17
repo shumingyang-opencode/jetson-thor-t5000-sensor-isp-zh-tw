@@ -54,6 +54,60 @@
 </table>
 
 
+<h2>2.4 深入原理：光 → 電荷 → 數位的位元層級</h2>
+<p>感測器像素是一個光電二極體 + 浮動節點。光子擊中半導體產生電子（<strong>QE，量子效率</strong>），電子累積在電容（<strong>full well</strong>），再經 <strong>讀出放大</strong>（conversion gain）與 <strong>ADC</strong> 轉成數位碼。關鍵位元級概念：</p>
+<div class="pipe"><span class="step">光子</span><span class="arr">→</span><span class="step">電子（QE）</span><span class="arr">→</span><span class="step">電容飽和（full well）</span><span class="arr">→</span><span class="step">電壓（gain）</span><span class="arr">→</span><span class="step">ADC（bit depth）</span><span class="arr">→</span><span class="step">RAW code</span></div>
+<table>
+<tr><th>名詞</th><th>意義</th><th>對影像的影響</th></tr>
+<tr><td>QE</td><td>光子 → 電子轉換率</td><td>低光靈敏度</td></tr>
+<tr><td>Full well</td><td>像素能存的最大電子數</td><td>飽和（過曝）門檻</td></tr>
+<tr><td>Conversion gain</td><td>電子 → 電壓放大</td><td>讀出雜訊/位元深</td></tr>
+<tr><td>Bit depth</td><td>ADC 解析度（如 10-bit）</td><td>階調與條帶</td></tr>
+</table>
+<div class="callout warn"><strong>調適語言：</strong>「過曝」在 register 層 = 像素電荷超過 full well，而「暗部斷階」= bit depth 不足或 gain 太小。說得出位元層原因，才能判斷是調 gain、調曝光還是換感測器。</div>
+
+<h2>2.5 Worked Example：一個像素從光子到 code</h2>
+<div class="demo-block"><div class="demo-label">估算像素輸出 code（OV9281：10-bit ADC，full well ≈ 10000 e⁻）</div><pre>假設該像素接收 4000 光子，QE=60%：
+電子數   = 4000 × 0.6 = 2400 e⁻
+飽和比例 = 2400 / 10000 = 24%
+輸出 code = 24% × 1023（10-bit 上限）≈ 245
+
+假設曝光時間加倍（光子→8000）：
+電子數   = 4800 e⁻ → code ≈ 491（線性）
+若超過 10000 e⁻ → code 卡在 1023 = 過曝</pre></div>
+<div class="callout"><strong>工程意義：</strong>RAW code 與光子數是<strong>線性</strong>關係（未過曝時）。這代表 AE 演算法能直接用 RAW 統計回推「還差幾倍曝光」——也是 NVIDIA AE 能快速收斂的原因。</div>
+
+<h2>2.6 Bayer CFA 排列與 binning 陷阱</h2>
+<p>OV9281 是 1MP 感測器，最常以 2×2（RGGB）輸出。問題常出在<strong>裁切/讀出區域</strong>：若讀出視窗的起始像素錯位，Bayer order 就會變成 GRBG 等變體，顏色全錯。</p>
+<div class="demo-block"><div class="demo-label">判別 Bayer order（拍一張純白）</div><pre>1. 拍白色卡片，取 RAW（unit-08）
+2. 把 2×2 的四個位置各取平均
+3. 兩個綠色通道平均應接近（Gr≈Gb）
+4. 若 Gr≠Gb → 不是 RGGB 就是讀出視窗錯位</pre></div>
+<div class="callout warn"><strong>陷阱：</strong>Bayer order 跟「幾顆感測器共用同一條 CSI」無關，它只由感測器讀出順序 + 裁切位置決定。改 mode 後務必重驗。</div>
+
+<h2>2.7 Global shutter 位元層差異（與帶狀光源）</h2>
+<p>Global shutter 讓所有像素「同時開始、同時結束」曝光；相較 rolling 逐列曝光。這讓 global 天生對 <strong>LED 調光、閃光燈</strong>免疫——因為取樣窗是整幀同步。</p>
+<table>
+<tr><th>現象</th><th>Rolling</th><th>Global</th></tr>
+<tr><td>LED 閃爍（banding）</td><td>易產生水平亮暗帶</td><td>整幀明暗、無帶狀</td></tr>
+<tr><td>快速移動物</td><td>果凍效應（傾斜）</td><td>不扭曲</td></tr>
+<tr><td>像素內存電荷</td><td>不需</td><td>需儲存節點（影響 QE/面積）</td></tr>
+</table>
+<div class="callout"><strong>選型智慧：</strong>物理 AI 機器人（SLAM、抓取）要 global；一般影像監控、相機才考慮 rolling 的價格與感光面積優勢。</div>
+
+<h2>2.8 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：把 RAW code 當成亮度</strong>——code 是線性的電子計數，而「看起來亮」要經 gamma。直接在 RAW 上比明暗會誤判。</div>
+<div class="callout warn"><strong>陷阱 2：忽略 full well 只調數位增益</strong>——數位增益放大飽和前的碼，但飽和邊界不變；曝光超過 full well 就 clip。</div>
+<div class="callout warn"><strong>陷阱 3：Bayer 與「黑白感測器」混淆</strong>——OV9281 也有 monochrome 版本（無 CFA），RAW 每像素就是灰階，不需要 demosaic。確認你手上是 color 版。</div>
+
+<h2>2.9 練習</h2>
+<ol>
+<li>用 full well 與 QE 估算某像素 12-bit ADC 下的飽和 code。</li>
+<li>解釋為何 global shutter 對帶狀光源免疫。</li>
+<li>設計一個 3 分鐘實驗，驗證你感測器的 Bayer order。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>感測器光→RAW 流程。</li><li>Bayer 排列。</li><li>Global shutter 對物理 AI 意義。</li><li>OV9281 規格與 ID register。</li></ul>

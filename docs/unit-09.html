@@ -39,6 +39,93 @@
 <div class="callout"><strong>Thor 定位：</strong>與 Orin 同為「NVIDIA 自動化調校」，但多了 <strong>HSB</strong> 感測器路徑與更強運算——適合即時物理 AI 的大量感測器融合。</div>
 
 
+<h2>9.2 深入原理：四平台「調校」到底在哪一層做</h2>
+<p>「ISP 架構差異」其實是「<strong>調校邏輯住在哪一層</strong>」的差異。這決定你能動什麼、誰在管。</p>
+<table>
+<tr><th>平台</th><th>調校邏輯位置</th><th>你能控制的</th><th>誰決定自動化</th></tr>
+<tr><td>RPi5</td><td>libcamera（user space）</td><td>所有參數（開源）</td><td>libcamera IPA</td></tr>
+<tr><td>Orange Pi</td><td>感測器內建 ISP</td><td>感測器 register</td><td>感測器韌體</td></tr>
+<tr><td>Orin Nano</td><td>NVIDIA ISP（libnvivp）</td><td>Argus 層</td><td>NVIDIA 自動化</td></tr>
+<tr><td><strong>Thor T5000</strong></td><td>Blackwell ISP + Holoscan</td><td>Argus / Holoscan 層</td><td>NVIDIA 自動化</td></tr>
+</table>
+<div class="callout"><strong>核心領悟：</strong>不是「誰的 ISP 比較強」，而是「誰的 ISP 調校你能碰到」。RPi5 看得見摸得著但效能低；Thor 效能高但深層參數以 NVIDIA 自動化為主。知道「邊界在哪」比比數字更重要。</div>
+
+<h2>9.3 Worked Example：同一個「調曝光」在四平台</h2>
+<div class="demo-block"><div class="demo-label">把曝光設定為某值</div><pre>RPi5 (libcamera):  libcamera-still --shutter 20000 --gain 2
+Orange Pi:         v4l2-ctl -d /dev/v4l-subdev0 -c exposure=20000
+Orin:              argus_camera ... SensorMode exp_time=20000
+Thor (HSB):        argus_camera / Holoscan SensorMode 同上</pre></div>
+<div class="callout"><strong>看到差異：</strong>指令語法不同，但背後都寫到同一顆感測器的 <code>0x3500–0x3502</code>。只要理解感測器 register（unit-03），換平台只換語法——這是整套課程的設計主軸。</div>
+
+<h2>9.4 疑難排解決策樹：換平台後「同樣的參數不同結果」</h2>
+<div class="demo-block"><div class="demo-label">跨平台移植調校結果</div><pre>1. 參數真的有套上嗎？（回讀驗證）
+   ├─ 否 → 找對平台的控制語法
+   └─ 是 ─┐
+2. ISP 順序/強度相同？
+   ├─ 否 → 各平台 ISP 區塊順序不同（如 NR 在 CCM 前/後）
+   └─ 是 ─┐
+3. 同一顆感測器 + 同一模式？
+   └─ 否 → 鎖定 sensor mode（unit-08）</pre></div>
+
+<h2>9.5 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：直接把 libcamera 的 tuning 檔搬給 Thor</strong>——不同 ISP 引擎的參數語義不同，套用前要先對映。</div>
+<div class="callout warn"><strong>陷阱 2：忽略「感測器內建 ISP」的存在</strong>——Orange Pi 類平台若感測器內建 ISP 已在處理，主機端再調會雙重處理。</div>
+<div class="callout warn"><strong>陷阱 3：Thor 走 HSB 時的「雙路徑」</strong>——感測器可能既輸出給本地 CSI 也給 HSB，兩路徑的 ISP 設定獨立，記得都驗證。</div>
+
+<h2>9.6 練習</h2>
+<ol>
+<li>把 unit-03 的「讀 ID」分別翻譯成四平台指令。</li>
+<li>列出四平台「你無法控制」的 ISP 參數。</li>
+<li>說明：若把 RPi5 的 tuning 給 Thor，你可能會遇到什麼問題。</li>
+</ol>
+
+
+<h2>9.7 深入原理：控制面、資料面與可觀測邊界</h2>
+<p>跨平台比較不能只看 API 名稱。把相機系統拆成<strong>控制面</strong>（I2C、曝光、模式、電源）與<strong>資料面</strong>（CSI/HSB、buffer、ISP、輸出），再標出調校檔實際生效的位置。相同的 <code>exposure</code> 名稱，可能只改 sensor register，也可能由平台 AE 在下一幀覆寫。</p>
+<table>
+<tr><th>問題</th><th>先看哪一層</th><th>跨平台差異</th></tr>
+<tr><td>讀不到 ID</td><td>控制面/I2C</td><td>bus、bridge、reset 不同</td></tr>
+<tr><td>有 RAW 無好色彩</td><td>資料面/ISP</td><td>可見 tuning 參數不同</td></tr>
+<tr><td>延遲或掉幀</td><td>buffer/排程</td><td>零拷貝與 queue 深度不同</td></tr>
+</table>
+<div class="callout"><strong>比較規則：</strong>先固定感測器、鏡頭、mode、曝光與輸出格式，再比較 ISP；否則看到的是輸入差異，不是平台差異。</div>
+
+<h2>9.8 Worked Example：同一個故障的四平台定位</h2>
+<div class="demo-block"><div class="demo-label">「畫面偏綠」跨平台查法</div><pre>RPi5：取 RAW → 關 IPA/AWB → 看 Bayer 與黑位 → 再查 libcamera tuning
+Orange Pi：確認 sensor 內建 ISP 是否已開 → 讀出未處理格式
+Orin：用 Argus 固定 AWB → 檢查 NVIDIA ISP 統計與 CCM
+Thor：分開驗證 CSI/HSB source → 固定 Holoscan source format → 查 ISP
+
+共同判斷：
+1. RAW 也偏綠？→ Bayer、黑位、sensor gains
+2. RAW 正常、YUV 偏綠？→ AWB/CCM/色彩矩陣
+3. 只有動態時偏綠？→ AE/AWB 收斂與 buffer 對應</pre></div>
+<p>同一個症狀的根因不一定相同。可攜移的是量測順序與判斷邏輯，不是 tuning 檔或命令列參數本身。</p>
+
+<h2>9.9 疑難排解決策樹：移植結果不一致</h2>
+<div class="demo-block"><div class="demo-label">先確認輸入，再比較演算法</div><pre>1. 感測器 ID、鏡頭、mode、fps 都相同？
+   ├─ 否 → 先建立同條件測試
+   └─ 是 ─┐
+2. RAW histogram / Bayer / 黑位相同？
+   ├─ 否 → 修 driver、格式或 sensor init
+   └─ 是 ─┐
+3. 同一曝光與 AWB 狀態下仍不同？
+   ├─ 是 → 比對 ISP block、tuning、gamma
+   └─ 否 → 可能是 AE/AWB closed-loop 收斂差異
+4. 效能不同？→ 分開量 capture、ISP、GPU、輸出 queue 延遲</pre></div>
+
+<h2>9.10 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：用畫面主觀判斷平台好壞。</strong>不同 gamma、色域、顯示路徑會改變觀感；保留 RAW、灰卡與量化指標。</div>
+<div class="callout warn"><strong>陷阱 2：把同名參數視為同義。</strong>gain、exposure、sharpness 的範圍與單位可能不同，必須回讀實際 register 或 metadata。</div>
+<div class="callout warn"><strong>陷阱 3：只移植成功畫面。</strong>量產還要比較啟動時間、掉幀、延遲、溫度與長時間穩定性。</div>
+
+<h2>9.11 練習</h2>
+<ol>
+<li>建立四平台同條件測試表，至少記錄 RAW、YUV、FPS、延遲與 CPU/GPU 使用率。</li>
+<li>選一個 tuning 參數，寫出「來源語義 → Thor 可對映設定 → 驗證方法」。</li>
+<li>用同一張灰卡完成一輪跨平台比較，將不可直接移植的差異分類成 sensor、ISP、輸出三類。</li>
+</ol>
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>四平台 ISP 差異。</li><li>Thor 與 Orin 共通與差異。</li><li>HSB 是 Thor 關鍵新能力。</li><li>何時選 Thor。</li></ul>

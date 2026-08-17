@@ -41,6 +41,64 @@
 <p class="hint">⚠️ 需官方文件確認：Thor 的 HSB 感測器配置與驅動細節仍在演進。</p>
 
 
+<h2>4.3 深入原理：V4L2/Argus/Holoscan 的分工與資料流</h2>
+<p>三者不是同層的替代品，而是「控制面」與「資料面」的分工：</p>
+<table>
+<tr><th>層</th><th>角色</th><th>誰在用</th></tr>
+<tr><td><strong>V4L2（含 subdev）</strong></td><td>Linux 標準相機/感測器介面、register 與格式控制</td><td>內核驅動、v4l2-ctl、media-ctl</td></tr>
+<tr><td><strong>Argus</strong></td><td>NVIDIA 應用層相機 API（控制 + 取流）</td><td>argus_camera、你的 app</td></tr>
+<tr><td><strong>Holoscan</strong></td><td>GPU 資料處理框架（感測器→CUDA→推理）</td><td>物理 AI 管線</td></tr>
+</table>
+<div class="pipe"><span class="step">感測器驅動（subdev）</span><span class="arr">→</span><span class="step">V4L2 video node</span><span class="arr">→</span><span class="step">Argus 封裝</span><span class="arr">→</span><span class="step">Holoscan Operator</span><span class="arr">→</span><span class="step">GPU 處理</span></div>
+<div class="callout"><strong>核心領悟：</strong>Argus 底下還是 V4L2；Holoscan 底下可能接 Argus 也可能直接接 V4L2。除錯時層層往下問：「是 register 沒設對（subdev），還是 buffer 沒到（V4L2），還是管線沒接（Holoscan）？」</div>
+
+<h2>4.4 Worked Example：看一張感測器圖（media graph）</h2>
+<div class="demo-block"><div class="demo-label">media-ctl 讀出整條感測器管線</div><pre>media-ctl -p -d /dev/media0
+<span class="hl-c"># 預期看到：ov9281 0x0036 subdev → csi → vi → video（/dev/video0）</span>
+<span class="hl-c"># 檢查：</span>
+<span class="hl-c">#  1. 感測器 subdev 是否 probe（有 node）</span>
+<span class="hl-c">#  2. link 是否 enable（→ 方向正確）</span>
+<span class="hl-c">#  3. /dev/video0 的 format 是否與感測器 mode 相符</span></pre></div>
+<div class="callout"><strong>通過標準：</strong>能看到「感測器 → CSI → VI → video」四層 node 且 link 全啟用，代表 DTB/驅動層已通。接著才是取流（unit-05）與畫質（unit-07 起）。</div>
+
+<h2>4.5 疑難排解決策樹：感測器沒有 probe</h2>
+<div class="demo-block"><div class="demo-label">「media graph 看不到感測器 subdev」</div><pre>1. dmesg 有 probe error？
+   ├─ 是 → 看 error 碼（unit-06 對照表）
+   └─ 否 ─┐
+2. DTB overlay 有啟用該感測器 node？
+   ├─ 否 → 檢查 <strong>compatible</strong> 是否匹配驅動
+   └─ 是 ─┐
+3. <strong>i2c address</strong> 在 DTB 與硬體一致？
+   ├─ 否 → 修正 reg
+   └─ 是 ─┐
+4. 感測器供電/clock/reset 由 GPIO 管？
+   └─ 是 → 查 power/reset 設定（unit-06）</pre></div>
+<p class="hint">⚠️ Thor 的 HSB 感測器以「host 端 Holoscan 通道」呈現，看不到傳統 media graph 時，改用 Holoscan 診斷工具確認資料是否進 GPU。</p>
+
+<h2>4.6 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：改 DTB 沒重建 kernel</strong>——overlay 沒生效，media graph 自然沒變化。用 <code>dmesg</code> 確認 overlay 有被載入。</div>
+<div class="callout warn"><strong>陷阱 2：Argus 的「相機編號」與 V4L2 node 對不上</strong>——Argus 依 sensor mode 與 topology 分配，不保證對應 /dev/video0。用 <code>argus_camera --list-cameras</code> 對照。</div>
+<div class="callout warn"><strong>陷阱 3：HSB 感測器沒有 /dev/videoN</strong>——走 HSB 的感測器資料不經傳統 VI，別拿「沒有 video node」當作感測器沒通；改用 Holoscan 通道驗證。</div>
+
+<h2>4.7 深入：Holoscan 在 Thor 上的「感測器來源」Operator</h2>
+<p>Holoscan 管線以 <strong>Operator</strong> 為單位：感測器資料進入管線時，由一個「感測器來源 operator」負責與底層（Argus 或 HSB channel）銜接，輸出 <code>VideoFrame</code> 給後續 GPU operator。</p>
+<div class="demo-block"><div class="demo-label">Holoscan 感測器來源（概念）</div><pre><span class="hl-c"># 管線示意（非完整程式碼）</span>
+Application:
+  ├─ SensorSourceOp（讀取感測器資料）
+  ├─ PreprocessOp（resize/轉格式，GPU）
+  ├─ InferenceOp（模型推理）
+  └─ SinkOp（輸出/顯示）
+<span class="hl-c"># 除錯時先確認 SensorSourceOp 有輸出，再查下游</span></pre></div>
+<div class="callout"><strong>對照：</strong>對 Argus 開發者來說，Holoscan 的來源 operator ≈ Argus 的「CameraProvider + Request」；只是多了 GPU 直連 buffer 與圖形管線語法。概念能平移。</div>
+
+<h2>4.8 練習</h2>
+<ol>
+<li>執行 media-ctl -p，畫出你的感測器管線圖。</li>
+<li>用 dmesg 找出感測器 probe 的關鍵 log 行。</li>
+<li>列出 Argus、V4L2、Holoscan 各自「你該用哪個指令」來驗證。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>Thor 沿用 Jetson V4L2/Argus。</li><li>Holoscan 在感測器處理角色。</li><li>HSB 資料路徑與 I2C 橋接。</li><li>Orin 技能可平移、HSB 是新技能。</li></ul>

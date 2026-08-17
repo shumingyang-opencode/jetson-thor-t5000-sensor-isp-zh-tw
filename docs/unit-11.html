@@ -54,6 +54,102 @@
 </ol>
 
 
+<h2>11.8 深入原理：灰世界假設與 gains 的位元級計算</h2>
+<p>AWB 的基礎是<strong>灰世界假設</strong>：場景平均應接近灰（R=G=B）。感測器在色溫變化下，R/B 通道增益要補償才能回到灰。</p>
+<div class="pipe"><span class="step">RAW（各通道平均）</span><span class="arr">→</span><span class="step">灰卡比例</span><span class="arr">→</span><span class="step">R/B gain 計算</span><span class="arr">→</span><span class="step">套用至感測器/ISP</span></div>
+<table>
+<tr><th>色溫</th><th>灰卡下 RAW 比例（R:G:B）</th><th>需要的增益</th></tr>
+<tr><td>日光 6500K</td><td>1.0 : 1.0 : 1.0</td><td>gR≈1.0, gB≈1.0</td></tr>
+<tr><td>暖白 3000K</td><td>1.4 : 1.0 : 0.7</td><td>gR≈0.7, gB≈1.4</td></tr>
+<tr><td>冷色 10000K</td><td>0.8 : 1.0 : 1.3</td><td>gR≈1.25, gB≈0.77</td></tr>
+</table>
+<div class="demo-block"><div class="demo-label">手算灰卡 gains</div><pre>拍灰卡，讀 RAW 四通道平均：
+R=700, Gr=500, Gb=520, B=400（10-bit）
+目標：R' = G' = B' = 某基準
+gR = Gr/R = 500/700 ≈ 0.71
+gB = Gr/B = 500/400 = 1.25
+基準用 Gr 通常最穩（兩綠通道平均）</pre></div>
+<div class="callout"><strong>記住：</strong>AWB gains 是「把 R/B 通道『縮放』到跟 G 對齊」。不是「加亮度」，是「調整色彩比例」——所以調 gain 不該改變整體亮度太多。</div>
+
+<h2>11.9 Worked Example：CCM 與 AWB 誰先誰後</h2>
+<div class="demo-block"><div class="demo-label">色彩管線順序</div><pre>AWB gains（感測器/ISP 前段）
+→ CCM（3×3 色彩矩陣，把感測器原生色域轉到目標色域）
+→ Gamma（人眼感知非線性）
+→ 輸出
+
+<span class="hl-c"># 判斷順序錯的徵兆：</span>
+<span class="hl-c"># 調整 AWB 後 CCM 也要重調，表示你改動順序搞混了</span></pre></div>
+<div class="callout warn"><strong>陷阱：</strong>感測器端與 NVIDIA 端都有 AWB/CCM。兩端同時開會「打架」——正確分工是：感測器先中性（關 AWB 或設固定），交給 NVIDIA AWB/CCM 收尾。</div>
+
+<h2>11.10 疑難排解決策樹：色彩異常</h2>
+<div class="demo-block"><div class="demo-label">「顏色不對」</div><pre>1. 中性場景偏某一色？
+   ├─ 關 AWB 手動設灰卡 → 驗證感測器本身
+   ├─ 仍偏 → CCM / 黑位（unit-07）
+   └─ 變正常 → AWB 沒收斂 / 混合色溫
+2. 高光區偏色？
+   └─ 色階 clipping 或 gamma
+3. 換 mode 後偏色？
+   └─ sensor mode 的 gains 表沒同步（unit-08）</pre></div>
+
+<h2>11.11 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：拿「白牆」當灰卡</strong>——白牆常含藍/黃色料。要真正中性灰卡或黑色/白平衡目標。</div>
+<div class="callout warn"><strong>陷阱 2：混合色溫場景</strong>——室內日光燈 + 窗邊陽光同時存在，單一 AWB 無法兩全，只能取主光源。</div>
+<div class="callout warn"><strong>陷阱 3：感測器 register gains 是「反比」易搞反</strong>——有的感測器 register 定義是「乘在訊號上」，有的給「1/gain」。查 datasheet，回讀驗證方向。</div>
+
+<h2>11.12 練習</h2>
+<ol>
+<li>灰卡校正一組 gains，並與理論值對照。</li>
+<li>故意把 gain 設反（0.7↔1.4），觀察並記下錯誤症狀。</li>
+<li>測試混合色溫場景，驗證「只能取主光源」。</li>
+</ol>
+
+
+<h2>11.13 深入原理：AWB 的統計、色溫與 CCM</h2>
+<p>AWB 不是把整張圖變白，而是從可信的中性區域估計照明色。ISP 通常先排除飽和、高彩度與陰影像素，再以區域統計求 R/G、B/G 比例；色溫只是這個比例的索引，不是感測器直接量到的物理溫度。CCM 再把感測器原生色域映射到輸出色域。</p>
+<div class="pipe"><span class="step">RAW channel stats</span><span class="arr">→</span><span class="step">outlier rejection</span><span class="arr">→</span><span class="step">AWB gains</span><span class="arr">→</span><span class="step">CCM</span><span class="arr">→</span><span class="step">gamma/output</span></div>
+<table>
+<tr><th>量測</th><th>可信條件</th><th>失效症狀</th></tr>
+<tr><td>R/G、B/G</td><td>灰卡或中性物、未飽和</td><td>整體偏色</td></tr>
+<tr><td>灰階軸</td><td>多個亮度區間都接近中性</td><td>高光或暗部單獨偏色</td></tr>
+<tr><td>CCM 色塊誤差</td><td>固定光源與曝光</td><td>特定色相偏移</td></tr>
+</table>
+
+<h2>11.14 Worked Example：從灰卡比例得到 gains</h2>
+<div class="demo-block"><div class="demo-label">固定中性基準的計算</div><pre>灰卡 RAW 平均：R=700, Gr=500, Gb=520, B=400
+G基準 = (Gr + Gb) / 2 = 510
+gR = 510 / 700 = 0.729
+gG = 1.000
+gB = 510 / 400 = 1.275
+
+套用後：R'≈510、G'≈510、B'≈510
+驗證：避開飽和區，重拍三個亮度級；若比例只在某一級成立，查 clipping、黑位或 sensor gain 格式。
+不要把 gR/gB 直接當成 CCM 係數，CCM 是 3×3 矩陣。</pre></div>
+<div class="callout"><strong>實作順序：</strong>先固定 AWB gains 讓灰卡中性，再量色卡估 CCM；若 AWB 還在追，色卡誤差會混入照明估計，導致錯誤的矩陣。</div>
+
+<h2>11.15 疑難排解決策樹：偏色是 AWB 還是 CCM</h2>
+<div class="demo-block"><div class="demo-label">用灰卡、色卡、RAW 三個證據分診</div><pre>1. RAW 四通道比例已不平衡？
+   ├─ 是 → sensor gains、黑位、Bayer 或 LSC
+   └─ 否 ─┐
+2. 關 AWB 後灰卡仍偏色？
+   ├─ 是 → CCM、gamma、輸出色域或 channel order
+   └─ 否 ─┐
+3. 灰卡正常、色卡特定色塊錯？
+   ├─ 是 → CCM / 色域映射
+   └─ 否 ─┐
+4. 只有混合光源錯？→ AWB ROI、主光源選擇與收斂策略</pre></div>
+
+<h2>11.16 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：用 JPEG RGB 反推 sensor gains。</strong>JPEG 可能已經過 gamma、CCM、飽和裁切；校正應使用 RAW 或線性資料。</div>
+<div class="callout warn"><strong>陷阱 2：把兩個綠色通道平均掉就結束。</strong>Gr/Gb 差異可揭露讀出、LSC 或 Bayer 問題；平均前要先檢查兩者是否合理。</div>
+<div class="callout warn"><strong>陷阱 3：在混合色溫場景追求全畫面中性。</strong>一組 gains 只能代表一個主照明；應定義 ROI、優先級與可接受色差。</div>
+
+<h2>11.17 練習</h2>
+<ol>
+<li>用三個亮度級灰卡計算 R/G/B gains，檢查是否因 clipping 而失真。</li>
+<li>固定 AWB 後拍色卡，將「灰卡誤差」與「色塊誤差」分開記錄。</li>
+<li>設計一個混合色溫場景，測試不同 AWB ROI 對結果與收斂速度的影響。</li>
+</ol>
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>NVIDIA AWB 自動/手動。</li><li>CCM 與色溫分段。</li><li>「感測器中性 → NVIDIA 色彩」分工。</li><li>NVIDIA 色彩調校可視性限制。</li></ul>

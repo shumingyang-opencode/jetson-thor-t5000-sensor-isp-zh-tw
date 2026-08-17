@@ -54,6 +54,107 @@ SensorMode ... gain = 2.0</pre></div>
 </ol>
 
 
+<h2>10.8 深入原理：曝光 register 的位元級與單位換算</h2>
+<p>OV9281 的曝光時間以「<strong>行</strong>（line）」為單位：每行時間 = line_length_pclk / pclk。這是 register 與真實時間換算的關鍵。</p>
+<table class="reg-table">
+<tr><th>Register</th><th>內容</th><th>範例值</th></tr>
+<tr><td class="reg">0x3501/0x3502</td><td>曝光行數（高/低 8-bit）</td><td>1000 = 0x03E8</td></tr>
+<tr><td class="reg">0x350A/0x350B</td><td>類比增益（整數 + 0.5 步進）</td><td>2.0 = 0x04 / 0x00</td></tr>
+</table>
+<div class="demo-block"><div class="demo-label">曝光行數 → 真實時間</div><pre>假設 pclk=96 MHz，line_length=1688 pclk
+每行時間 = 1688 / 96M ≈ 17.6 µs
+曝光 1000 行 = 17.6 ms
+
+假設目標曝光 20 ms：
+行數 = 20000 µs / 17.6 µs ≈ 1136 行 → 寫 0x3501=0x04, 0x3502=0x70</pre></div>
+<div class="callout warn"><strong>陷阱：</strong>不要把 Argus 的「exp_time（µs）」直接寫進 register。Argus 會幫你換算；但手動控制（或感測器內建 ISP 平台）必須自己算行數。單位搞錯是曝光問題第一名。</div>
+
+<h2>10.9 Worked Example：AE 被「上限卡住」的診斷</h2>
+<div class="demo-block"><div class="demo-label">畫面過暗，判斷卡在哪</div><pre>1. 讀目前曝光與增益：
+   v4l2-ctl -d /dev/v4l-subdev0 -C exposure
+   v4l2-ctl -d /dev/v4l-subdev0 -C gain
+2. 若 exposure 已達上限（如最大行數）：
+   → 光線不足，靠曝光救不回 → 補光 / 換鏡頭光圈
+3. 若 gain 已達上限（如 8×）且雜訊明顯：
+   → 增益撐到極限，品質崩壞 → 補光優先
+4. 若兩者都沒到上限但畫面仍暗：
+   → AE 統計/目標設定問題（不是光學問題）</pre></div>
+<div class="callout"><strong>工程原則：</strong>曝光優先序永遠是「快門 → 類比增益 → 數位增益」。數位增益是最後的不得已，因為它放大「訊號 + 雜訊」而不是只加訊號。</div>
+
+<h2>10.10 疑難排解決策樹：過暗/過亮/banding</h2>
+<div class="demo-block"><div class="demo-label">曝光三症狀</div><pre>過暗：
+ ├─ AE 卡上限 → 補光/光圈
+ ├─ AE 統計錯誤 → 場景過暗或有遮罩
+ └─ 黑位錯 → 回 unit-08
+過亮：
+ ├─ AE 目標太高 → 調目標亮度
+ ├─ 曝光行數爆掉 → 查 max
+ └─ 感測器飽和 → 縮光圈/曝光
+banding（條紋）：
+ ├─ 日光燈 50/60Hz → 曝光時間為市電週期的整數倍
+ └─ 感測器讀出問題 → 查 clock</pre></div>
+
+<h2>10.11 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：把數位增益當萬能</strong>——數位增益放大雜訊。低光品質要看「類比增益極限 + 補光」而非拉數位。</div>
+<div class="callout warn"><strong>陷阱 2：忽略曝光對 motion blur 的影響</strong>——global shutter 只是「整幀同步」，不是「曝光變短」。機器人高速運動仍要短曝光，否則 blur。</div>
+<div class="callout warn"><strong>陷阱 3：banding 只想到電源</strong>——市電閃爍（50/60Hz）造成的是時間性 banding，與電源 ripple 不同。分別處理。</div>
+
+<h2>10.12 練習</h2>
+<ol>
+<li>讀出你感測器目前曝光行數，換算成 ms。</li>
+<li>設定 20 ms 曝光並回讀驗證。</li>
+<li>在日光燈下調整曝光為 50Hz 整數倍，觀察 banding 消失。</li>
+</ol>
+
+
+<h2>10.13 深入原理：曝光、幀時間與運動模糊</h2>
+<p>曝光不是孤立的 register。對每一個 sensor mode，都有 line length、frame length、pixel clock 與最大曝光行數。幀時間由 frame length × line time 決定；曝光越長，留給讀出與下一幀的餘裕越少。global shutter 解決的是逐列不同步，不會消除長曝光造成的 motion blur。</p>
+<div class="pipe"><span class="step">mode timing</span><span class="arr">→</span><span class="step">line time</span><span class="arr">→</span><span class="step">exposure lines</span><span class="arr">→</span><span class="step">frame interval</span><span class="arr">→</span><span class="step">motion blur / banding</span></div>
+<table>
+<tr><th>限制</th><th>結果</th><th>調整方向</th></tr>
+<tr><td>曝光超過 frame margin</td><td>FPS 降低或 driver clamp</td><td>查 frame length/max exposure</td></tr>
+<tr><td>曝光接近 10/20 ms 的非整數</td><td>LED/市電 banding</td><td>鎖定 anti-flicker 時間</td></tr>
+<tr><td>運動速度高</td><td>模糊，即使 global shutter</td><td>縮短 exposure、補光、提高 gain</td></tr>
+</table>
+
+<h2>10.14 Worked Example：由目標 FPS 反推曝光上限</h2>
+<div class="demo-block"><div class="demo-label">60 fps mode 的 timing budget</div><pre>目標 FPS = 60 → frame interval = 16.67 ms
+假設 line time = 17.6 µs
+最大曝光行數（保留 8 行 margin）
+  = floor(16,670 / 17.6) - 8
+  ≈ 939 lines
+最大曝光時間 ≈ 939 × 17.6 µs = 16.53 ms
+
+若 AE 要 20 ms：
+  → 不能同時維持 60 fps，必須降 fps、提高補光或接受 gain
+驗證：比較設定值、回讀值、metadata 中的實際 exposure。</pre></div>
+<div class="callout"><strong>工程判讀：</strong>Argus 顯示的目標值不等於感測器最後接受的值。每次調 AE 都要同時記錄 requested、applied、frame rate 三個數字。</div>
+
+<h2>10.15 疑難排解決策樹：AE 不穩或曝光不正確</h2>
+<div class="demo-block"><div class="demo-label">把控制問題與光學問題分開</div><pre>1. requested 與 applied exposure 不同？
+   ├─ 是 → 查 mode 上限、frame margin、單位換算
+   └─ 否 ─┐
+2. RAW histogram 是否隨曝光改變？
+   ├─ 否 → 查 register latch、stream 狀態、sensor reset
+   └─ 是 ─┐
+3. 亮度仍上下跳動？
+   ├─ 是 → 查 AE target、ROI、統計延遲與 anti-flicker
+   └─ 否 ─┐
+4. 亮度正常但影像糊/有條紋？
+   └─ 查運動速度、光源頻率與曝光時間，不要先拉數位增益</pre></div>
+
+<h2>10.16 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：把曝光單位當微秒直接寫 register。</strong>Argus 的時間通常是 API 單位，sensor register 常是行數；中間必須用 mode timing 換算。</div>
+<div class="callout warn"><strong>陷阱 2：只看顯示器亮度。</strong>顯示器可能套 gamma、tone mapping 或自動亮度；AE 驗證要看 RAW histogram 與 metadata。</div>
+<div class="callout warn"><strong>陷阱 3：用提高 FPS 解決延遲卻忘了光量。</strong>FPS 提高會縮小曝光 budget，低光時可能導致 gain 爆升與 SNR 惡化。</div>
+
+<h2>10.17 練習</h2>
+<ol>
+<li>從一個實際 mode 的 pclk、line length、frame length 算出 line time 與最大曝光。</li>
+<li>建立 30/50/60 fps 的 anti-flicker 測試，記錄 banding 與實際 applied exposure。</li>
+<li>固定亮度，分別改曝光與類比增益，量測 motion blur、SNR、FPS 的取捨。</li>
+</ol>
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>曝光三要素。</li><li>Argus 控制曝光。</li><li>NVIDIA AE 自動收斂。</li><li>「上限受限」除錯方向。</li></ul>

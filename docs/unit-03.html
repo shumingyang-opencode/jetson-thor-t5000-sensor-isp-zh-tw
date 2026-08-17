@@ -58,6 +58,60 @@ sudo i2cget -y <bus> 0x36 0x300b     <span class="hl-c"># = 0x81</span></pre></d
 </ol>
 
 
+<h2>3.10 深入原理：register 位元級——曝光與增益怎麼拆</h2>
+<p>OV 感測器用 16-bit register 位址（big-endian），多欄位暫存器把 16-bit 值拆成多個 register。以曝光與增益為例（unit-10 會詳述控制）：</p>
+<table class="reg-table">
+<tr><th>Register</th><th>位元布局</th><th>說明</th></tr>
+<tr><td class="reg">0x3501/0x3502</td><td>AEC[15:8] / AEC[7:0]</td><td>曝光時間（行數）高低位</td></tr>
+<tr><td class="reg">0x350A/0x350B</td><td>AGC[7:0] / AGC[0.5:0]</td><td>類比增益整數+小數</td></tr>
+</table>
+<div class="demo-block"><div class="demo-label">把「曝光 1000 行」寫成 register（位元級）</div><pre><span class="hl-c"># 1000 decimal = 0x03E8 → 高 byte 0x03、低 byte 0xE8</span>
+i2cset -y &lt;bus&gt; 0x36 0x3501 0x03
+i2cset -y &lt;bus&gt; 0x36 0x3502 0xE8
+<span class="hl-c"># 回讀驗證（單元 3.9 的練習）</span>
+i2cget -y &lt;bus&gt; 0x36 0x3501   <span class="hl-c"># 應回 0x03</span>
+i2cget -y &lt;bus&gt; 0x36 0x3502   <span class="hl-c"># 應回 0xE8</span></pre></div>
+<div class="callout warn"><strong>陷阱：</strong>直接寫 16-bit 值時，<code>i2cset</code> 預設可能是 8-bit 寫入，會把值截斷。務必確認單一 register 寬度（多數 OV 是 8-bit register），否則曝光「看似寫了卻沒變」。</div>
+
+<h2>3.11 Worked Example：完整 I2C 讀取流程（含 ACK）</h2>
+<div class="demo-block"><div class="demo-label">讀 OV9281 ID（0x300A=0x92）逐步拆解</div><pre><span class="hl-c"># 1. 掃描找 bus</span>
+sudo i2cdetect -l
+sudo i2cdetect -y &lt;bus&gt;          <span class="hl-c"># 0x36 出現 = 有回應</span>
+<span class="hl-c"># 2. 讀 ID 高位（兩種寫法等價）</span>
+sudo i2cget -y &lt;bus&gt; 0x36 0x300a      <span class="hl-c"># 預期 0x92</span>
+sudo i2ctransfer -y &lt;bus&gt; w2@0x36 0x30 0x0a r1
+<span class="hl-c"># w2 = 寫 2 bytes（register 位址高、低），r1 = 讀 1 byte</span></pre></div>
+<div class="callout"><strong>為什麼 i2ctransfer 更可靠：</strong>它把「寫位址 + 讀資料」做成單一 transaction，保證 register 位址在讀前設定——避免其他執行緒在同一 bus 插入。檢查回讀值是否與 datasheet 相符，即完成最小 I2C 驗證。</div>
+
+<h2>3.12 疑難排解決策樹：讀不到感測器 ID</h2>
+<div class="demo-block"><div class="demo-label">「i2cdetect 看不到 0x36」決策樹</div><pre>1. bus 選對了嗎？
+   ├─ 錯 → 依 board 文件找正確 bus 編號（可能不是 0）
+   └─ 對 ─┐
+2. 感測器供電（AVDD/DVDD）到位？
+   ├─ 否 → 查電源（unit-06）
+   └─ 是 ─┐
+3. RESET/GPIO 是否已釋放？
+   ├─ 否 → 依上電時序釋放 reset
+   └─ 是 ─┐
+4. (HSB) I2C 橋接通道通？
+   ├─ 否 → 檢查 HSB 網路與橋接設定
+   └─ 是 ─┐
+5. 全部確認仍 0xFF？→ 換一顆感測器 / 檢查焊接與位址 pin</pre></div>
+<p class="hint">⚠️ 位址除了 0x36，部分感測器依 ID pin 可變（如 0x3C）。用 <code>i2cdetect</code> 全域掃描最保險。</p>
+
+<h2>3.13 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：忘了 7-bit/8-bit 位址轉換</strong>——0x36 是 7-bit 位址；某些工具要求你傳 8-bit（0x36&lt;&lt;1）。i2c-tools 接受 7-bit，SCCB/其他工具可能不同。</div>
+<div class="callout warn"><strong>陷阱 2：16-bit register 位址不是先低後高</strong>——OV 是 big-endian（先高位址）。倒過來寫會讀到錯的 register。</div>
+<div class="callout warn"><strong>陷阱 3：HSB 下 I2C 延遲較高</strong>——走乙太橋接時，讀寫往返有額外延遲；嚴謹的驅動會做重試。快速連續寫多 register 時，留意「bridge 佇列滿」造成的無回應。</div>
+
+<h2>3.14 練習</h2>
+<ol>
+<li>用 i2ctransfer 讀 0x300A/0x300B 並記錄。</li>
+<li>把曝光 2000 行拆成 register 高低位寫入並回讀驗證。</li>
+<li>故意把 register 位址寫顛倒，觀察讀回值，建立「位址錯誤」的辨識能力。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>Thor 上 I2C 控制感測器。</li><li>HSB 的 I2C 橋接概念。</li><li>OV9281 ID register。</li><li>「讀不到 ID」排查。</li></ul>

@@ -52,6 +52,103 @@
 
 
 
+<h2>8.9 深入原理：RAW10 的 packing 位元級</h2>
+<p>感測器輸出 10-bit 像素，但儲存/傳輸常包成 <strong>RAW10</strong>（4 bytes 裝 5 pixels）節省頻寬。解析 RAW 前必須先 unpack，否則像素值全錯。</p>
+<div class="demo-block"><div class="demo-label">RAW10 packing（MIPI 4-byte / 5-pixel）</div><pre>5 個 10-bit 像素 = 50 bits
+pack 成 4 bytes（32 bits）：前 8 個 pixel[7:0] 高位，
+再放 2 個「整組 extra」bit 集合
+<span class="hl-c"># 以 Python 讀取：raw10 bytes → 像素 array</span>
+def unpack_raw10(buf):
+    out = []
+    for i in range(0, len(buf), 5):
+        b0,b1,b2,b3,b4 = buf[i:i+5]
+        out.append((b0<<2) | (b4>>0 & 0x03))
+        out.append((b1<<2) | (b4>>2 & 0x03))
+        out.append((b2<<2) | (b4>>4 & 0x03))
+        out.append((b3<<2) | (b4>>6 & 0x03))
+        out.append(b4>>... )  <span class="hl-c"># 依 MIPI 規範實作</span>
+    return out</pre></div>
+<div class="callout warn"><strong>陷阱：</strong>用錯 packing（把 10-bit 當 16-bit 或 8-bit 讀）→ 畫面呈現「條紋狀假影」或色帶。解 RAW 一律用與 sensor mode 相符的 unpack 函式，且先驗證：讀回黑位應是固定常數。</div>
+
+<h2>8.10 Worked Example：從 RAW 檔驗證 Bayer order 與黑位</h2>
+<div class="demo-block"><div class="demo-label">分析 RAW 前三步</div><pre>python3 - <<'EOF'
+import rawpy, numpy as np
+raw = rawpy.imread('frame.dng').raw_image
+print(raw.shape)                # (H, W)，1 channel（Bayer）
+bl = raw[0:20, 0:20].mean()     # 黑框區應接近黑位
+print('black level ~', bl)
+b = raw[::2, ::2]; g1 = raw[::2, 1::2]
+g2 = raw[1::2, ::2]; r = raw[1::2, 1::2]
+print('R/Gr/Gb/B means:', r.mean(), g1.mean(), g2.mean(), b.mean())
+EOF</pre></div>
+<div class="callout"><strong>判讀：</strong>拍純白時 R≈G≈B；拍灰卡時四通道比例應固定。若 Gr≠Gb → Bayer order 錯（unit-02 曾提）。黑位若飄移 → 感測器 OB/暗電流問題。</div>
+
+<h2>8.11 疑難排解決策樹：RAW 顯示異常</h2>
+<div class="demo-block"><div class="demo-label">「RAW 看起來不對」</div><pre>1. 有彩色條紋？
+   ├─ packing 錯（unit-08 陷阱）
+   └─ 或 Bayer order 錯
+2. 全圖偏某一色？
+   └─ Bayer order 判別（拍白卡）
+3. 有固定直條紋？
+   └─ 位元深/packing 錯、或 stride 算錯
+4. 有亮點/黑點？
+   └─ 缺陷像素（unit-13 DPC）
+5. 曝光不對？
+   └─ 回 unit-10 曝光控制</pre></div>
+
+<h2>8.12 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：stride/pitch 沒算</strong>——每列結尾可能 padding（如對齊到 8/16 bytes）。用 rows×cols×bytes 假設算 offset 會錯位。</div>
+<div class="callout warn"><strong>陷阱 2：RAW 位元深搞混</strong>——10-bit sensor 用 10-bit 讀出，即使存成 16-bit，內容仍是 0–1023。直接當 16-bit 用會把有效範圍誤判。</div>
+<div class="callout warn"><strong>陷阱 3：HSB 端 RAW 有「封包 header」混入</strong>——走乙太網路時，解包需先剝離封包 metadata，否則第一列會多出幾 byte 造成錯位。</div>
+
+<h2>8.13 練習</h2>
+<ol>
+<li>取一張 RAW 並寫 unpack 驗證黑位。</li>
+<li>拍白卡確認 Bayer order。</li>
+<li>故意用錯位元深讀一次，記下「條紋」的特徵，練出辨識力。</li>
+</ol>
+
+
+<h2>8.14 深入原理：MIPI CSI-2、stride 與有效像素</h2>
+<p>解析 RAW 時要把三個概念分開：<strong>有效像素</strong>是感測器真正輸出的 W×H，<strong>payload</strong> 是 packing 後的位元組，<strong>stride/pitch</strong> 則是 buffer 每列實際跳過的距離。MIPI packet 的 word count 只描述 payload，不一定等於 driver buffer 的 pitch；DMA 對齊也可能在每列尾端加入 padding。</p>
+<table>
+<tr><th>層級</th><th>要回答的問題</th><th>驗證</th></tr>
+<tr><td>CSI packet</td><td>DT、word count、ECC/CRC 是否正確？</td><td>dmesg、CSI counter</td></tr>
+<tr><td>buffer layout</td><td>每列從哪個 byte 開始？</td><td>bytesperline、plane length</td></tr>
+<tr><td>pixel decode</td><td>每 10/12 bit 如何還原？</td><td>灰階分布、黑位、白位</td></tr>
+</table>
+<div class="callout"><strong>判斷原則：</strong>若第一列正常、每列逐漸錯位，先查 stride；若每五個像素重複出現條紋，先查 RAW10 packing；若整張圖顏色一致地錯，才查 Bayer order。</div>
+
+<h2>8.15 Worked Example：從 CSI 位元數到檔案大小</h2>
+<div class="demo-block"><div class="demo-label">1280×800 RAW10 的三個答案</div><pre>有效像素：1280 × 800 = 1,024,000 pixels
+<p>這個例子說明「檔案大小正確」仍不代表畫面正確：若讀檔程式忽略 64 bytes padding，第二列起就會斜移。先從 V4L2 query 回讀 <code>bytesperline</code> 與 <code>sizeimage</code>，再決定 decoder 的 row stride。</p>
+
+<h2>8.16 疑難排解決策樹：RAW 條紋從哪一層來</h2>
+<div class="demo-block"><div class="demo-label">逐層縮小範圍</div><pre>1. CSI/HSB 有 CRC、drop 或 sequence error？
+   ├─ 有 → 先查 lane rate、線材、封包/網路統計
+   └─ 無 ─┐
+2. 每列起點是否依 bytesperline 前進？
+   ├─ 否 → 修 stride/pitch 與 plane offset
+   └─ 是 ─┐
+3. 5-pixel/4-byte（或 sensor 指定）邊界出現規律條紋？
+   ├─ 是 → 修 RAW packing / bit shift
+   └─ 否 ─┐
+4. 白卡四通道是否只是顏色順序錯？
+   ├─ 是 → 修 Bayer order
+   └─ 否 → 查曝光、黑位、DPC 與 ISP</pre></div>
+
+<h2>8.17 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：把 CSI bit rate 當成檔案 bytes。</strong>CSI 還有 packet/header、lane 分配與對齊；頻寬估算與 buffer layout 必須分開。</div>
+<div class="callout warn"><strong>陷阱 2：忽略有效位元所在 bit。</strong>有些 10-bit 16-bit container 左移 6 bit，有些右對齊；直接轉成 uint16 會讓亮度差 64 倍。</div>
+<div class="callout warn"><strong>陷阱 3：用 ISP 後的 YUV 判斷 RAW。</strong>YUV 已經過黑位、demosaic、gamma；格式問題要回到 RAW 或未處理 capture 驗證。</div>
+
+<h2>8.18 練習</h2>
+<ol>
+<li>讀出平台的 <code>bytesperline</code>、<code>sizeimage</code>、fourcc，寫下三者關係。</li>
+<li>用同一幀資料分別套用正確與錯誤 stride，描述兩者的視覺特徵。</li>
+<li>用白卡與黑框各做一次 Bayer、packing、黑位檢查，將結果存入回歸紀錄。</li>
+</ol>
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>RAW vs NV12 用途。</li><li>HSB 資料封包的 RAW 分析。</li><li>Bayer order 陷阱。</li><li>RAW 在調校分析角色。</li></ul>

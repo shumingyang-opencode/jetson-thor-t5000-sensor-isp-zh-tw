@@ -70,6 +70,52 @@
 </ol>
 
 
+  <h2>14.8 深入原理：銳化的數學與 MTF</h2>
+<p>銳化通常是 <strong>unsharp mask</strong>：原圖 + k×(原圖 − 模糊圖)。過度銳化會在邊緣產生 <strong>overshoot/halo</strong>（白邊），並放大雜訊。衡量鏡頭+感測器解析能力的是 <strong>MTF</strong>（對比度 vs 空間頻率）。</p>
+<div class="pipe"><span class="step">原圖</span><span class="arr">→</span><span class="step">低通模糊（blur）</span><span class="arr">→</span><span class="step">差值 = 高頻細節</span><span class="arr">→</span><span class="step">原圖 + k×差值</span><span class="arr">→</span><span class="step">銳化圖</span></div>
+<div class="demo-block"><div class="demo-label">銳化強度與代價</div><pre>k=0     → 無銳化（原始，可能偏軟）
+k=0.5   → 輕銳化（細節改善，halo 小）
+k=1.0   → 中銳化（明顯，halo 開始可見）
+k=2.0   → 過銳化（halo 明顯 + 雜訊放大）
+
+判別法：放大 100% 看字體/邊緣，有白邊 = halo</pre></div>
+<div class="callout warn"><strong>陷阱：</strong>銳化是「最後的美化」，不是「解決感測器模糊」的手段。若 RAW 就糊（MTF 低），銳化只會產生假邊緣。先確認對焦、再談銳化。</div>
+
+<h2>14.9 Worked Example：tone mapping 曲線設計</h2>
+<div class="demo-block"><div class="demo-label">高動態場景的 tone mapping（示意）</div><pre>輸入 RAW（0–1023）→ 輸出 8-bit（0–255）
+線性 mapping：out = in/4 → 高光爆、暗部死黑
+tone mapping：用 S 曲線（log 或自訂）：
+  in=0-100   → 壓暗部細節（提升可見性）
+  in=100-800 → 接近線性（主體區）
+  in=800-1023→ 壓高光（保留雲層層次）
+<span class="hl-c"># 檢查重點：暗部不死黑、高光不爆、中段對比自然</span></pre></div>
+<div class="callout"><strong>工程順序：</strong>先量測場景的動態範圍需求（unit-14.6），再決定單幀 tone mapping 或多幀 HDR。HDR 不該是預設——運動場景多幀會有殘影，改單幀+tone mapping。</div>
+
+<h2>14.10 疑難排解決策樹：影像「太硬/太糊/爆掉」</h2>
+<div class="demo-block"><div class="demo-label">三種影像問題</div><pre>1. 太糊（細節少）？
+   ├─ 對焦 → 銳化調整（勿過度）
+   ├─ RAW 就糊 → 換鏡頭/光圈（非調校可救）
+   └─ NR 太強 → 降 NR（unit-13）
+2. 太硬（halo/假邊）？
+   └─ 降銳化 k 值
+3. 高光爆/暗部死黑？
+   ├─ 動態範圍需求 > 單幀 → tone mapping / HDR
+   ├─ 曝光錯 → unit-10
+   └─ gamma 沒套 → 回 unit-07</pre></div>
+
+<h2>14.11 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：過度銳化當「提升清晰度」</strong>——halo 會讓機器視覺誤判邊緣，物理 AI 場景尤其危險。</div>
+<div class="callout warn"><strong>陷阱 2：HDR 用在運動場景</strong>——多幀 HDR 需要對齊；快速移動會產生殘影。動態場景優先單幀+tone mapping。</div>
+<div class="callout warn"><strong>陷阱 3：沒有回歸就把調校上線</strong>——每次改動要「一次只改一個參數 + 統一場景 + 完整 log」（unit-14.7 範本）。</div>
+
+<h2>14.12 練習</h2>
+<ol>
+<li>用一組圖比較 k=0/0.5/1/2 的銳化效果，找出你家場景的甜蜜點。</li>
+<li>設計 tone mapping 曲線並用灰階漸層驗證「暗部不死黑、高光不爆」。</li>
+<li>完成一輪「校正→美化→回歸」並填 tuning log。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>NVIDIA 銳化/對比。</li><li>Thor 多幀 HDR。</li><li>NVIDIA 調校工作流五步。</li><li>「讓自動化做事」哲學。</li></ul>

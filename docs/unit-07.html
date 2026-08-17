@@ -35,6 +35,76 @@
 <p class="hint">⚠️ Thor ISP 完整公開參數集以官方文件為準。</p>
 
 
+<h2>7.2 深入原理：每個 ISP 區塊做什麼</h2>
+<p>NVIDIA ISP（libnvivp 同族）的管線區塊各自對應一種「影像缺陷」。除錯時反過來用：<strong>看到什麼症狀 → 哪個區塊負責</strong>。</p>
+<table>
+<tr><th>區塊</th><th>作用</th><th>症狀若停用</th></tr>
+<tr><td>黑位 OB</td><td>扣除感測器暗電流偏移</td><td>整體偏灰/偏綠</td></tr>
+<tr><td>LSC</td><td>補償鏡頭陰影</td><td>四角偏暗偏色（unit-12）</td></tr>
+<tr><td>Demosaic</td><td>Bayer → RGB 重建</td><td>彩色假影/雜訊（aliasing）</td></tr>
+<tr><td>NR</td><td>空間/時間降噪</td><td>低光雜訊明顯（unit-13）</td></tr>
+<tr><td>CCM</td><td>色彩矩陣校正</td><td>色偏不自然（unit-11）</td></tr>
+<tr><td>Gamma/TM</td><td>亮度對數曲線/色調映射</td><td>高光爆、暗部死黑</td></tr>
+<tr><td>Statistics</td><td>算 AE/AWB 需要的統計值</td><td>AE/AWB 收斂不正常</td></tr>
+</table>
+<div class="callout"><strong>調適心態：</strong>NVIDIA 的自動調校是「以統計回饋為閉迴路」。你的任務不是手動微調每一塊，而是確保：① 感測器 init 正確（前面單元）② 場景合理 → 讓 AE/AWB 自動收斂到統計目標。</div>
+
+<h2>7.3 Worked Example：一個像素通過管線</h2>
+<div class="demo-block"><div class="demo-label">追蹤一個 RAW code（灰卡 500）</div><pre>RAW code = 500（10-bit）
+OB 扣除：500 − 黑位(64) = 436
+LSC：中央增益 1.0 → 436
+Demosaic：鄰近 R/G/B 內插 → R=430, G=436, B=432
+NR：小幅平滑 → 不變（訊號不強）
+CCM：3×3 矩陣轉換 → R'=0.9R−0.1G+... → 校正後色
+Gamma：code 經過非線性 → 128（8-bit 輸出）
+輸出：127~129 的灰</pre></div>
+<div class="callout"><strong>為什麼這樣追：</strong>當輸出「偏綠」，你就能沿管線往前猜：黑位沒設對？CCM 沒套？還是 AWB gains 錯？把「症狀」映射到「區塊」是 ISP 調校的核心技能。</div>
+
+<h2>7.4 疑難排解決策樹：輸出影像異常</h2>
+<div class="demo-block"><div class="demo-label">「畫面怪怪的」決策樹</div><pre>1. 整體偏色？
+   ├─ AWB/CCM 關閉？→ 手動設灰卡白平衡
+   └─ 仍偏 → 黑位 OB 檢查
+2. 四角暗？
+   └─ LSC（unit-12）
+3. 低光雜訊多？
+   └─ NR 與增益（unit-13）
+4. 高光爆、暗部死黑？
+   └─ Gamma/TM 與曝光（unit-10/14）
+5. 動態畫面有假影？
+   └─ 幀率/曝光（unit-11 幀率單元、unit-14）</pre></div>
+
+<h2>7.5 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：黑位沒設就調 AWB</strong>——OB 錯會讓所有統計值偏移，AE/AWB 跟著收斂到錯誤目標。校正順序：先黑位、再 LSC、才談色彩（unit-14 工作流）。</div>
+<div class="callout warn"><strong>陷阱 2：把 ISP 當「全都自動」</strong>——自動化只在「感測器資料正確」的前提下成立。RAW 端就錯（黑位、Bayer、飽和），自動化只會放大錯誤。</div>
+<div class="callout warn"><strong>陷阱 3：gamma 後再比較 RAW 亮度</strong>——gamma 是非線性，輸出亮度與 RAW code 不是線性對應。比較畫質要在同一階段（RAW vs RAW，或 sRGB vs sRGB）。</div>
+
+<h2>7.6 深入：統計回饋與 NVIDIA 自動調校閉迴路</h2>
+<p>NVIDIA ISP 的 AE/AWB 是「閉迴路」：ISP 計算每幀統計（亮度分布、色平衡），演算法依統計調整參數，下一幀再重算——如此反覆收斂。</p>
+<div class="pipe"><span class="step">ISP 算統計</span><span class="arr">→</span><span class="step">AE/AWB 演算法</span><span class="arr">→</span><span class="step">改參數</span><span class="arr">→</span><span class="step">下幀重算</span><span class="arr">→</span><span class="step">收斂</span></div>
+<table>
+<tr><th>統計</th><th>餵給誰</th><th>異常時症狀</th></tr>
+<tr><td>亮度直方圖</td><td>AE</td><td>過暗/過亮</td></tr>
+<tr><td>色平衡統計</td><td>AWB</td><td>色偏</td></tr>
+<tr><td>區域統計（格子）</td><td>AE/AWB</td><td>局部曝光錯</td></tr>
+</table>
+<div class="callout"><strong>調校哲學：</strong>你「讓統計目標合理」，NVIDIA 幫你「追目標」。比如想要偏亮 → 提高 AE 目標亮度；想要暖色 → 設 AWB 目標色溫。不是手動逐幀調。</div>
+
+<h2>7.7 Worked Example：AE 收斂觀察</h2>
+<div class="demo-block"><div class="demo-label">從過暗場景看到收斂</div><pre>1. 開機拍暗場景：畫面很暗
+2. 幾幀後 AE 逐步調高曝光/增益 → 畫面變亮
+3. 檢查收斂：亮度不再大幅跳動 = 已收斂
+4. 若一直跳動或過暗：
+   → 統計目標錯 / 上限卡住 / 感測器 RAW 有問題
+   （回到 unit-10 的「上限卡住」診斷）</pre></div>
+
+<h2>7.8 練習</h2>
+<ol>
+<li>把 7.3 的像素追蹤在自己的 RAW 上跑一遍（取灰卡 RAW）。</li>
+<li>列出你的平台 ISP 的區塊順序，標出每塊的輸入/輸出。</li>
+<li>設計一個「關掉某一區塊」的實驗，驗證你對管線的理解。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>Thor ISP 沿 NVIDIA 架構。</li><li>ISP 區塊與統計回饋。</li><li>「自動調校」心態。</li><li>與 Orin 調校共通性。</li></ul>

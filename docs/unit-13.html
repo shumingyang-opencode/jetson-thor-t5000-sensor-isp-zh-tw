@@ -73,6 +73,111 @@ EOF</pre></div>
 </ol>
 
 
+<h2>13.8 深入原理：雜訊模型與 SNR 的數學</h2>
+<p>感測器雜訊可模型化成兩大類，理解它們才能預測「哪個參數會讓雜訊爆炸」。</p>
+<table>
+<tr><th>雜訊</th><th>模型</th><th>特性</th></tr>
+<tr><td>Shot noise（光子雜訊）</td><td>σ = √N（N=電子數）</td><td>與訊號正相關，無法消除</td></tr>
+<tr><td>Read noise（讀出雜訊）</td><td>固定 σ_r</td><td>低光時主導</td></tr>
+<tr><td>Dark current</td><td>隨溫度/曝光時間</td><td>長曝光 + 高溫明顯</td></tr>
+<tr><td>FPN</td><td>固定 pattern</td><td>與場景無關的固定圖樣</td></tr>
+</table>
+<div class="demo-block"><div class="demo-label">SNR 計算（shot + read）</div><pre>電子數 N，read noise σ_r：
+總雜訊 σ = √(N + σ_r²)
+SNR = 20·log10(N / σ) dB
+
+例：N=1000, σ_r=30
+σ = √(1000 + 900) ≈ 43.6
+SNR = 20·log10(1000/43.6) ≈ 27 dB
+
+若增益 ×2（等效 N 變小但 read noise 放大）：
+雜訊會比「同曝光直接 +50% 光」更糟</pre></div>
+<div class="callout"><strong>關鍵領悟：</strong>增益會放大「訊號 + read noise」；而加曝光（光子）只加訊號、shot noise 以 √N 成長。所以「加曝光」永遠優於「拉增益」——這正是 unit-10 順序鐵則的數學根源。</div>
+
+<h2>13.9 Worked Example：決定補光 or 接受雜訊</h2>
+<div class="demo-block"><div class="demo-label">完整 SNR 預算</div><pre>場景：低光，目標 SNR ≥ 30 dB
+選項 A：gain ×4（不補光）
+  量測 RAW 雜訊 σ=25，訊號=200
+  SNR = 20·log10(200/25) = 18 dB ✗
+選項 B：補光讓訊號 ×2（gain ×1）
+  訊號=800（感測器飽和前），σ≈18
+  SNR = 20·log10(800/18) ≈ 33 dB ✓
+結論：補光 + 低增益 遠優於 硬拉增益</pre></div>
+<div class="callout"><strong>工程判讀：</strong>先用 SNR 預算量化，再決定資源投入（補光/換鏡頭/換感測器），而不是盲目拉高增益後才發現雜訊不可接受。</div>
+
+<h2>13.10 疑難排解決策樹：低光雜訊</h2>
+<div class="demo-block"><div class="label">「低光畫面髒」</div><pre>1. 增益拉太高？
+   ├─ 是 → 補光 / 縮短快門 / 加曝光（unit-10）
+   └─ 否 ─┐
+2. 長曝光造成 dark current？
+   ├─ 是 → 降溫 / 縮短曝光
+   └─ 否 ─┐
+3. 固定圖樣雜訊（FPN）？
+   ├─ 是 → 校正 / DPC
+   └─ 否 ─┐
+4. ISP NR 沒開或太弱？
+   └─ 是 → 調 NR（空間+時間）</pre></div>
+
+<h2>13.11 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：用數位增益「救」低光</strong>——數學上已證明劣於補光/加曝光。先把類比增益與曝光用滿，再談數位。</div>
+<div class="callout warn"><strong>陷阱 2：NR 開太強</strong>——空間降噪會抹細節，時間降噪在動態場景會留殘影。NR 是「取捨」，不是「開越大越好」。</div>
+<div class="callout warn"><strong>陷阱 3：DPC 沒先做就 NR</strong>——熱點會先被 NR 擴散成亮斑，而非修掉。順序是 DPC 先、NR 後（unit-13.7）。</div>
+
+<h2>13.12 練習</h2>
+<ol>
+<li>量 σ vs gain 曲線，找出增益上限。</li>
+<li>用 SNR 預算比較「gain×4」與「補光×2」。</li>
+<li>黑框 RAW 驗證 DPC 效果（max 被壓制）。</li>
+</ol>
+
+
+<h2>13.13 深入原理：從 noise source 到 ISP NR</h2>
+<p>降噪的輸入不是單一的「髒」數字。shot noise 隨訊號以平方根成長，read noise 在低光占比高，FPN/DPC 則具有空間固定性。空間 NR 依鄰域相似性抑制，時間 NR 依前後幀相似性抑制；兩者都可能把真實細節或快速運動當成雜訊。</p>
+<div class="pipe"><span class="step">sensor RAW</span><span class="arr">→</span><span class="step">black/LSC</span><span class="arr">→</span><span class="step">DPC</span><span class="arr">→</span><span class="step">spatial NR</span><span class="arr">→</span><span class="step">temporal NR</span><span class="arr">→</span><span class="step">sharpen</span></div>
+<table>
+<tr><th>類型</th><th>辨識特徵</th><th>優先處理</th></tr>
+<tr><td>shot/read noise</td><td>隨曝光或 gain 改變</td><td>光量、類比 gain、NR</td></tr>
+<tr><td>FPN</td><td>固定條紋/固定亮暗點</td><td>黑位校正、校正表</td></tr>
+<tr><td>hot/dead pixel</td><td>固定位置極端值</td><td>DPC，不能靠強 NR</td></tr>
+</table>
+
+<h2>13.14 Worked Example：用兩張黑框估計 read noise</h2>
+<div class="demo-block"><div class="demo-label">固定條件下分離平均與變動</div><pre>同一曝光、溫度、gain 取 20 張暗場 RAW
+對每個像素計算：
+  mean = 20 張平均       # black level / FPN
+  std  = 20 張標準差      # temporal read noise
+
+全域：mean=64.8, std=3.1 code
+若某些位置 mean=140 且每張都固定 → hot pixel / FPN
+若整區 std 隨 gain 從 3.1 升到 12.4 → gain 放大 read noise
+
+決策：先修固定偏差，再用 NR 處理隨機變動。</pre></div>
+<div class="callout"><strong>量測注意：</strong>比較 gain 或溫度時，不能把不同曝光、不同 black level 的平均差當成 noise。測試表要記錄 mode、曝光、gain、溫度、幀數與 ROI。</div>
+
+<h2>13.15 疑難排解決策樹：畫面髒、糊或有殘影</h2>
+<div class="demo-block"><div class="demo-label">辨識是源頭、NR 還是 sharpen</div><pre>1. 關閉/降低 NR 後雜訊是否仍在 RAW？
+   ├─ 是 → 先查曝光、gain、溫度、黑位
+   └─ 否 ─┐
+2. 雜訊固定在同一像素？
+   ├─ 是 → DPC/FPN 校正
+   └─ 否 ─┐
+3. 動態物體後方有拖影？
+   ├─ 是 → 降低 temporal NR，查 motion threshold
+   └─ 否 ─┐
+4. 邊緣有白邊/假紋理？→ 降 sharpen 或 spatial NR strength</pre></div>
+
+<h2>13.16 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：用均勻灰圖量所有雜訊。</strong>灰圖同時包含光子雜訊與照明不均；暗場、平場、細節場景要分開。</div>
+<div class="callout warn"><strong>陷阱 2：先開強 NR 再量測感測器。</strong>NR 會改寫原始統計，所有 sensor quality 結論都應以 RAW 或關閉 NR 的路徑為準。</div>
+<div class="callout warn"><strong>陷阱 3：把 DPC 當成 NR。</strong>DPC 修的是可定位的缺陷像素；NR 修的是統計性變動，兩者順序與驗證指標不同。</div>
+
+<h2>13.17 練習</h2>
+<ol>
+<li>在兩個 gain、兩個溫度各取 20 張暗場，畫出 mean/std 對照表。</li>
+<li>用固定圖樣與移動場景分別調 spatial/temporal NR，記錄 SNR 與細節保留。</li>
+<li>為產品定義三個門檻：可接受 SNR、最大 hot pixel 數、不可接受殘影程度。</li>
+</ol>
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>四種雜訊來源。</li><li>NVIDIA 空間+時間降噪。</li><li>「先源頭後收尾」策略。</li><li>降噪與細節取捨。</li></ul>

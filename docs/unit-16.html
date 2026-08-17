@@ -69,6 +69,109 @@
 </ol>
 
 
+  <h2>16.6 深入原理：HSB 多感測器頻寬與同步</h2>
+<p>多感測器走 HSB（25GbE）時，兩個必修課：<strong>頻寬規劃</strong>與<strong>時間同步</strong>。</p>
+<table>
+<tr><th>面向</th><th>計算/方式</th><th>檢查</th></tr>
+<tr><td>頻寬</td><td>Σ (W×H×bit × fps)</td><td>務必 < 25GbE 可用頻寬（留 headroom）</td></tr>
+<tr><td>同步</td><td>PTP/IEEE 1588 或感測器 frame sync</td><td>多相機時間戳對齊</td></tr>
+<tr><td>封包</td><td>每顆感測器獨立 channel</td><td>host 端一一對應</td></tr>
+</table>
+<div class="demo-block"><div class="demo-label">雙 OV9281 頻寬估算</div><pre>每顆：1280×800 RAW10 @ 120 fps
+  = 1280×800×10 × 120 = 1,228,800,000 bit/s ≈ 1.23 Gbps
+兩顆：≈ 2.46 Gbps
+25GbE headroom：25 × 0.7（保守）≈ 17.5 Gbps 可用
+→ 2.46 Gbps 完全沒問題，還能再加十顆
+（若用 12MP RAW12 @ 30fps = 4.5 Gbps/顆，25GbE 約可載 3–4 顆）</pre></div>
+<div class="callout warn"><strong>陷阱：</strong>25GbE 是「線路速率」，不是「可用速率」。封包 overhead、PCIe/GPU 瓶頸都要扣。規劃請用 50–70% 為安全上限。</div>
+
+<h2>16.7 Worked Example：雙感測器同步曝光（frame sync）</h2>
+<div class="demo-block"><div class="demo-label">兩顆 OV9281 同步取樣</div><pre>1. 硬體：接 frame sync（FSIN）pin，由 host 給同步脈衝
+2. 確認兩顆都設「external sync」模式
+   （依感測器 register，unit-03 的方法回讀驗證）
+3. 驗證同步：
+   - 取兩顆同場景的幀，比較時間戳
+   - 或用「同一轉動物體」確認無相位差
+4. (HSB) 若走網路：用 PTP 對齊時間基準
+   <span class="hl-c"># 時間戳差 < 1 幀週期 → 同步可接受</span></pre></div>
+<div class="callout"><strong>為什麼重要：</strong>立體視覺、多視角融合需要「同一瞬間」的曝光，否則深度圖會因運動不一致而產生誤差。同步是 HSB 多感測器的核心價值。</div>
+
+<h2>16.8 疑難排解決策樹：多感測器異常</h2>
+<div class="demo-block"><div class="demo-label">「兩顆畫面不同步 / 掉幀」</div><pre>1. 個別單顆都正常？
+   ├─ 否 → 回到單顆 bring-up（unit-06）
+   └─ 是 ─┐
+2. 總頻寬超過安全上限？
+   ├─ 是 → 降 fps/解析度，或拆通道
+   └─ 否 ─┐
+3. 時間戳/同步基準一致？
+   ├─ 否 → 設 frame sync 或 PTP
+   └─ 是 ─┐
+4. host 端 channel 一一對應？
+   └─ 否 → 對應錯誤，修 Holoscan 設定</pre></div>
+
+<h2>16.9 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：忽略單顆先驗</strong>——多感測器問題 80% 是「某一顆」沒通。先逐顆 bring-up、逐顆獨立 LSC，才談融合。</div>
+<div class="callout warn"><strong>陷阱 2：頻寬算「線路速率」</strong>——25GbE 只算裸資料，實際剩 50–70%。算錯會掉幀。</div>
+<div class="callout warn"><strong>陷阱 3：不同步就上線</strong>——立體/融合應用對時間戳敏感，務必驗證同步（16.7）。</div>
+
+<h2>16.10 練習</h2>
+<ol>
+<li>估算你專案的多感測器總頻寬，對照 25GbE 安全上限。</li>
+<li>驗證兩顆感測器的時間戳差（或設計同步實驗）。</li>
+<li>寫一份可重複執行的「多感測器 bring-up + 調校」SOP。</li>
+</ol>
+
+
+<h2>16.11 深入原理：多鏡頭系統的三個時鐘</h2>
+<p>多感測器融合至少要區分三種時間：<strong>曝光時間</strong>（物理世界被取樣的時刻）、<strong>sensor frame counter</strong>（感測器產生第幾幀）、<strong>host arrival time</strong>（封包到達 GPU 的時刻）。HSB 的網路延遲可能讓 arrival time 不等於曝光先後，因此融合要依硬體 frame sync、PTP timestamp 或 metadata 對齊，不能只依封包抵達順序。</p>
+<div class="pipe"><span class="step">FSIN / sensor clock</span><span class="arr">→</span><span class="step">exposure timestamp</span><span class="arr">→</span><span class="step">packet/frame counter</span><span class="arr">→</span><span class="step">HSB/PCIe arrival</span><span class="arr">→</span><span class="step">Holoscan synchronizer</span></div>
+<table>
+<tr><th>證據</th><th>能證明什麼</th><th>不能單獨證明</th></tr>
+<tr><td>link up</td><td>實體/網路層可通</td><td>感測器資料正確</td></tr>
+<tr><td>相同 FPS</td><td>平均速率接近</td><td>每幀時間對齊</td></tr>
+<tr><td>相同 arrival time</td><td>host 收到接近</td><td>曝光同時發生</td></tr>
+</table>
+
+<h2>16.12 Worked Example：兩顆相機的完整驗證表</h2>
+<div class="demo-block"><div class="demo-label">從單顆到融合的 gate</div><pre>Gate A：各自 bring-up
+  cam0/cam1 都能讀 ID、取 RAW、固定曝光、無 CSI/HSB error
+Gate B：各自畫質
+  黑位、Bayer、LSC、AWB、SNR 通過同一套門檻
+Gate C：同步
+  frame counter 無跳號；曝光 timestamp 差 ≤ 0.5 ms
+Gate D：頻寬與長跑
+  Σ raw bitrate + overhead < 25GbE 安全上限
+  30 分鐘無 drop、queue 不持續成長、GPU latency 穩定
+Gate E：融合輸出
+  用移動標記物量測視差/相位，保存原始 metadata 與結果</pre></div>
+<p>只通過 Gate A 不能宣稱多鏡頭系統完成。把每個 gate 的輸入、命令、門檻與 artifact 存進 repo，日後換線材、韌體或 sensor 才能重跑。</p>
+
+<h2>16.13 疑難排解決策樹：多鏡頭掉幀或融合錯位</h2>
+<div class="demo-block"><div class="demo-label">先找單點故障，再找系統性故障</div><pre>1. 單獨跑每顆 30 分鐘都穩定？
+   ├─ 否 → 回單顆 power/I2C/CSI/HSB bring-up
+   └─ 是 ─┐
+2. 總 bitrate 加 overhead 是否超安全上限？
+   ├─ 是 → 降解析度/fps、分流、提高 buffer/網路預算
+   └─ 否 ─┐
+3. frame counter 是否連續且 channel 對應正確？
+   ├─ 否 → 查封包丟失、queue、Holoscan channel mapping
+   └─ 是 ─┐
+4. exposure timestamp 是否對齊？
+   ├─ 否 → 查 FSIN/PTP/clock domain
+   └─ 是 → 查 calibration、鏡頭幾何與融合演算法</pre></div>
+
+<h2>16.14 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：以為 25GbE 裸速就是可用預算。</strong>封包、metadata、重傳/緩衝、PCIe 與 GPU copy 都要留 headroom；以長時間測試結果為準。</div>
+<div class="callout warn"><strong>陷阱 2：只用同一場景肉眼看同步。</strong>靜態場景看不出錯位；用高速移動標記、時間戳與 frame counter 一起驗證。</div>
+<div class="callout warn"><strong>陷阱 3：多顆同時調校。</strong>一次改一顆、一次改一層；否則無法知道掉幀或色差來自哪個 sensor。</div>
+
+<h2>16.15 練習</h2>
+<ol>
+<li>替你的每顆感測器建立 Gate A–E 表格，填入明確命令、門檻與輸出檔。</li>
+<li>用解析度、bit depth、fps 與 overhead 估算總頻寬，並以 30 分鐘長跑驗證。</li>
+<li>設計一個移動標記同步實驗，同時保存 frame counter、exposure timestamp、arrival timestamp。</li>
+</ol>
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>HSB 多感測器與 Holoscan 管線。</li><li>Thor 接 OV9281 完整案例。</li><li>「自動化收斂 + 只干預異常」。</li><li>最佳實踐。</li></ul>

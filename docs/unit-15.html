@@ -78,6 +78,49 @@ Orin/Thor: i2ctransfer -y 0  w2@0x36 0x30 0x0a r1</pre></div>
 </ol>
 
 
+  <h2>15.6 深入原理：四平台工具鏈與調校資料格式</h2>
+<p>四平台的「調校產出」型態不同，直接影響你怎麼交付、怎麼版本控管。</p>
+<table>
+<tr><th>平台</th><th>調校工具</th><th>產出格式</th><th>交付形式</th></tr>
+<tr><td>RPi5</td><td>libcamera-tuning</td><td>JSON tuning 檔</td><td>repo 版本控管</td></tr>
+<tr><td>Orange Pi</td><td>register 直改</td><td>register dump / init 表</td><td>DT/腳本</td></tr>
+<tr><td>Orin</td><td>NVIDIA tuning 工具</td><td>內部 tuning 資料</td><td>韌體/工具輸出</td></tr>
+<tr><td><strong>Thor</strong></td><td>NVIDIA 工具 + Holoscan</td><td>同上 + Holoscan 設定</td><td>SDK/container</td></tr>
+</table>
+<div class="callout"><strong>務實建議：</strong>不管平台，你的「自己產出」（灰卡校正表、曝光換算表、tuning log）都應以文字檔放入 repo——那是跨平台唯一可平移、可重現的部分。</div>
+
+<h2>15.7 Worked Example：同一顆 OV9281 的四平台調校 SOP</h2>
+<div class="demo-block"><div class="demo-label">從 bring-up 到出圖的四平台對照</div><pre>RPi5:  dtoverlay=ov9281 → libcamera-still → libcamera-tuning
+Orange Pi: DTB + i2c init 表 → v4l2-ctl → 感測器內建 ISP
+Orin:  tegracam sensor_mode → argus_camera → NVIDIA 工具
+Thor:  (HSB) Holoscan channel → argus/Holoscan → NVIDIA 工具
+
+<span class="hl-c"># 共同主軸：I2C（unit-03）→ bring-up（unit-06）→ 取流（unit-05）→ RAW 分析 → 調校</span></pre></div>
+<div class="callout"><strong>核心領悟：</strong>四平台是「同一套原理、不同語法」。把 unit-03/06/10-14 的原則學起來，四平台都能快速上手；反之若只背指令，換平台就歸零。</div>
+
+<h2>15.8 疑難排解決策樹：跨平台移植</h2>
+<div class="demo-block"><div class="demo-label">把 RPi5 成果搬到 Thor</div><pre>1. 感測器 register 設定（unit-03）可否直接搬？
+   ├─ 同感測器 → 是（register 相同）
+   └─ 不同 → 需新 init 表
+2. 調校參數（AWB/LSC）可否直接搬？
+   ├─ 平台 ISP 不同 → 否，語義需對映
+   └─ 同 NVIDIA 族（Orin↔Thor）→ 部分可對映
+3. 解析度/模式一致？
+   └─ 鎖定 sensor mode 後才比（unit-08）</pre></div>
+
+<h2>15.9 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：直接套 JSON tuning 檔</strong>——libcamera 的 JSON 與 NVIDIA 內部格式語義不同，套用前要對映或重校。</div>
+<div class="callout warn"><strong>陷阱 2：忽略感測器內建 ISP</strong>——Orange Pi 型平台若感測器已在處理，主機端再調是雙重處理。</div>
+<div class="callout warn"><strong>陷阱 3：Thor 的 HSB 與 CSI 是兩條獨立路徑</strong>——同樣的感測器走不同路徑，調校可能不同步，兩邊都要驗。</div>
+
+<h2>15.10 練習</h2>
+<ol>
+<li>列出四平台的調校產出格式與交付方式。</li>
+<li>把 unit-03 的「讀 ID」翻成四平台指令。</li>
+<li>評估：把 Orin 的調校搬到 Thor 與搬到 RPi5，哪個風險低？為什麼？</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>四平台調校能力差異。</li><li>Thor 次世代定位與 HSB 優勢。</li><li>Thor 與 Orin 關係。</li><li>依需求選平台。</li></ul>

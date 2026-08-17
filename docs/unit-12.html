@@ -54,6 +54,101 @@ EOF</pre></div>
 
 
 
+<h2>12.8 深入原理：cos⁴ 定律與分通道成因</h2>
+<p>鏡頭邊緣光量低於中心，主因是 <strong>cos⁴ 定律</strong>：離軸角度 θ 造成 <strong>cos⁴θ</strong> 的光量衰減。這影響是「幾何的」而非感測器問題。另一個成因是 <strong>光線斜射通過濾色片</strong>，使邊緣光譜偏移 → R/B 通道 shading 不一致 → 角落偏色。</p>
+<div class="pipe"><span class="step">cos⁴θ 衰減</span><span class="arr">→</span><span class="step">整體暗角（luma shading）</span><span class="arr">→</span><span class="step">光譜偏移</span><span class="arr">→</span><span class="step">角落偏色（color shading）</span></div>
+<div class="demo-block"><div class="demo-label">cos⁴ 手算</div><pre>視場角 30°（θ=30°）：
+cos(30°) ≈ 0.866
+cos⁴(30°) ≈ 0.866⁴ ≈ 0.562
+→ 邊緣光量只有中心的 56% → 需要 gain ≈ 1/0.562 ≈ 1.78
+
+視場角 20°：
+cos⁴(20°) ≈ 0.78 → gain ≈ 1.28</pre></div>
+<div class="callout"><strong>直覺：</strong>越廣角、增益越大，角落增益過高會放大雜訊。這就是為什麼 LSC 要在 NR 之前做——先補償幾何衰減，再談降噪（unit-13 會講順序）。</div>
+
+<h2>12.9 Worked Example：手算一顆網格節點的增益</h2>
+<div class="demo-block"><div class="demo-label">從灰卡 RAW 估角落增益</div><pre>python3 - <<'EOF'
+import numpy as np
+raw = np.load('grey_raw.npy')   # 分好通道的 R/Gr/Gb/B
+h, w = raw.shape
+center = raw[h//2-50:h//2+50, w//2-50:w//2+50].mean()
+corner = raw[50:150, 50:150].mean()
+print('center', center, 'corner', corner)
+print('gain   ', center/corner)   # 角落要乘的增益
+EOF</pre></div>
+<div class="callout"><strong>注意：</strong>這是最簡化的一點估法。真正 LSC 網格是每節點各自分通道的增益，節點間雙線性插值。量產務必用 NVIDIA 工具（拍多張、自動產生網格），手算只為理解原理。</div>
+
+<h2>12.10 疑難排解決策樹：暗角/偏色</h2>
+<div class="demo-block"><div class="demo-label">「角落偏暗或偏色」</div><pre>1. 是「整體暗」還是「角落特別暗」？
+   ├─ 角落特別暗 → LSC 未校正 / 未更新
+   └─ 整體暗 → 曝光（unit-10）
+2. LSC 已開仍暗角？
+   ├─ 換過鏡頭/感測器？→ 重新校正（組合特有）
+   └─ 網格解析度不足？→ 提高網格密度
+3. 角落偏色（非暗）？
+   └─ color shading 校正（分通道網格）</pre></div>
+
+<h2>12.11 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：用彩色場景校正 LSC</strong>——場景本身有明暗就會被誤當成 shading。要用均勻灰卡 + 均勻光源。</div>
+<div class="callout warn"><strong>陷阱 2：換鏡頭不重校</strong>——LSC 是「鏡頭+感測器」組合的特有結果。換鏡頭後若暗角變化 &gt;5%，一定要重校。</div>
+<div class="callout warn"><strong>陷阱 3：只校正亮度不分通道</strong>——color shading 需要 R/Gr/Gb/B 各自的網格，單一亮度網格解不了偏色。</div>
+
+<h2>12.12 練習</h2>
+<ol>
+<li>拍灰卡，量測中心與四角亮度比。</li>
+<li>用 12.9 的方法估一個角落節點增益。</li>
+<li>比較「換鏡頭前後」的 shading，驗證重校需求。</li>
+</ol>
+
+
+<h2>12.13 深入原理：LSC 網格、插值與雜訊</h2>
+<p>LSC 不是把四角任意拉亮，而是為每個 Bayer 通道建立空間增益場。實際像素落在網格節點之間時，ISP 以雙線性插值取得增益；因此網格太粗會留下波紋，太細則對校正圖雜訊與灰卡不均勻更敏感。</p>
+<div class="pipe"><span class="step">均勻灰 RAW</span><span class="arr">→</span><span class="step">四通道 cell mean</span><span class="arr">→</span><span class="step">中心/局部比</span><span class="arr">→</span><span class="step">平滑/限制 gain</span><span class="arr">→</span><span class="step">雙線性插值</span></div>
+<table>
+<tr><th>校正項</th><th>代表問題</th><th>驗證</th></tr>
+<tr><td>luma shading</td><td>角落暗</td><td>灰卡亮度徑向曲線</td></tr>
+<tr><td>color shading</td><td>角落偏色</td><td>R/Gr/Gb/B 四通道曲線</td></tr>
+<tr><td>高增益限制</td><td>角落雜訊被放大</td><td>LSC 前後 SNR</td></tr>
+</table>
+<div class="callout"><strong>重要：</strong>LSC 應使用與產品實際相同的 focus、光圈、曝光、色溫與 sensor mode。裁切或 binning 改變光線映射時，舊網格不一定能沿用。</div>
+
+<h2>12.14 Worked Example：由灰卡量測產生四通道節點</h2>
+<div class="demo-block"><div class="demo-label">一個 4×4 網格節點的計算</div><pre>中心基準：R=800, Gr=820, Gb=815, B=780
+左上 cell：R=600, Gr=650, Gb=640, B=560
+
+gain_R  = 800 / 600 = 1.333
+gain_Gr = 820 / 650 = 1.262
+gain_Gb = 815 / 640 = 1.273
+gain_B  = 780 / 560 = 1.393
+
+限制最大 gain（例如 1.5）後，與鄰近節點平滑，
+再由 ISP 在 cell 內插值。若單一節點跳變，輸出可能出現棋盤或光暈。</pre></div>
+<p>實驗時要拍多張取平均，排除灰卡反光與 temporal noise；比較 LSC 前後時要固定 AE，否則亮度變化會掩蓋校正效果。</p>
+
+<h2>12.15 疑難排解決策樹：LSC 開了仍不均勻</h2>
+<div class="demo-block"><div class="demo-label">先判斷資料與網格是否對應</div><pre>1. 校正圖與產品 mode/解析度相同？
+   ├─ 否 → 重新拍該 mode 的灰卡
+   └─ 是 ─┐
+2. 是亮度暗角還是色彩暗角？
+   ├─ 亮度 → 查 luma gain、曝光一致性、鏡頭光圈
+   └─ 色彩 → 查 R/Gr/Gb/B 分通道網格
+3. LSC 前後角落變亮但雜訊爆？
+   ├─ 是 → 限制最大 gain、改善光源或重新選鏡頭
+   └─ 否 ─┐
+4. 出現棋盤/波紋？→ 查網格密度、節點平滑與 stride</pre></div>
+
+<h2>12.16 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：用畫面中心當絕對真值。</strong>中心也可能受曝光、反光與 shading 影響；應使用多區域、分通道、重複拍攝。</div>
+<div class="callout warn"><strong>陷阱 2：LSC 與 AWB 同時自動變動。</strong>AWB 會改變通道比例，使你無法知道偏色修正來自哪一層；校正時先固定 AWB。</div>
+<div class="callout warn"><strong>陷阱 3：直接沿用另一顆鏡頭的網格。</strong>焦距、光圈、法蘭距與感測器 cover glass 都會改變 shading。</div>
+
+<h2>12.17 練習</h2>
+<ol>
+<li>以同一 mode 拍三張灰卡，計算中心與四角四通道平均及標準差。</li>
+<li>產生兩種網格密度，觀察暗角殘留、波紋與噪聲放大的差異。</li>
+<li>換鏡頭或改光圈重做驗證，建立「哪些條件需要重新校正」清單。</li>
+</ol>
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>lens shading 成因。</li><li>NVIDIA LSC 網格。</li><li>LSC 需隨組合重新校正。</li><li>多感測器獨立 LSC。</li></ul>

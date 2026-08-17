@@ -73,6 +73,54 @@ ip link show                              <span class="hl-c"># HSB 網路介面<
 </ol>
 
 
+<h2>6.9 深入原理：上電時序的位元/電壓層級細節</h2>
+<p>Bring-up 失敗九成是「時序」而非「電壓值」。感測器 datasheet 的 power-up sequence 通常長這樣：</p>
+<div class="pipe"><span class="step">DVDD/AVDD 供電</span><span class="arr">→</span><span class="step">等待穩定（~10ms）</span><span class="arr">→</span><span class="step">MCLK 開始</span><span class="arr">→</span><span class="step">RESET 拉高釋放</span><span class="arr">→</span><span class="step">等待 ~1ms</span><span class="arr">→</span><span class="step">I2C 可通</span></div>
+<table>
+<tr><th>檢查項</th><th>常見數值（依感測器）</th><th>量測工具</th></tr>
+<tr><td>電源穩定到 clock 啟動</td><td>1–10 ms</td><td>示波器雙通道</td></tr>
+<tr><td>MCLK 頻率</td><td>24 MHz（常見）</td><td>示波器頻率計</td></tr>
+<tr><td>RESET 低脈衝寬</td><td>≥ 1 µs</td><td>示波器</td></tr>
+<tr><td>RESET 釋放到 I2C</td><td>≥ 1 ms</td><td>邏輯分析儀</td></tr>
+</table>
+<div class="callout warn"><strong>最常見錯誤：</strong>RESET 未釋放就下 I2C → 感測器「有通電但不回應」，register 寫入無效。這是「能 i2cdetect 到、但讀回全 0」的典型原因。</div>
+
+<h2>6.10 Worked Example：完整 Bring-up 五階段</h2>
+<div class="demo-block"><div class="demo-label">OV9281 標準 Bring-up SOP</div><pre><span class="hl-c"># 階段 1：電源</span>
+sudo cat /sys/kernel/debug/gpio | grep -i reset   <span class="hl-c"># 確認 reset GPIO 定義</span>
+<span class="hl-c"># 階段 2：clock（確認 MCLK 有輸出 24MHz）</span>
+sudo cat /sys/kernel/debug/clk/clk_summary | grep -i mclk
+<span class="hl-c"># 階段 3：I2C（先掃描）</span>
+sudo i2cdetect -y &lt;bus&gt;          <span class="hl-c"># 0x36 出現</span>
+<span class="hl-c"># 階段 4：讀 ID 驗證</span>
+sudo i2cget -y &lt;bus&gt; 0x36 0x300a  <span class="hl-c"># 0x92</span>
+<span class="hl-c"># 階段 5：media graph + 取流（unit-05）</span>
+media-ctl -p -d /dev/media0 | grep ov9281</pre></div>
+<div class="callout"><strong>鐵則：</strong>每一階段「過」了才進下一階段。I2C 通 ≠ clock 對；clock 對 ≠ MIPI 對。一次驗證一層，別把時間花在「以為都通」上。</div>
+
+<h2>6.11 疑難排解：dmesg 訊號對照表</h2>
+<table>
+<tr><th>dmesg 徵兆</th><th>可能原因</th><th>下一步</th></tr>
+<tr><td><code>i2c transfer error</code></td><td>I2C 不通 / 位址錯 / RESET 未釋放</td><td>檢查時序與位址</td></tr>
+<tr><td><code>mclk ... not set</code></td><td>clock 沒有配置</td><td>查 DTB clocks 與 clk driver</td></tr>
+<tr><td><code>csi-2 recv timeout</code></td><td>MIPI 訊號/速率不匹配</td><td>查 lane 數、頻率、連接</td></tr>
+<tr><td><code>no sensor detected</code></td><td>probe 沒通過</td><td>查 compatible、供電、ID</td></tr>
+<tr><td><code>HSB link down</code></td><td>乙太網路層未通（HSB）</td><td>檢查網路線/25GbE 設定</td></tr>
+</table>
+
+<h2>6.12 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：MCLK 頻率設錯</strong>——感測器 datasheet 會指定（如 24 MHz），給錯頻率感測器可能啟動但不合規，造成偶發掉幀。</div>
+<div class="callout warn"><strong>陷阱 2：RESET 是高電位釋放、低電位 assert</strong>——搞反 polarity，感測器永遠在 reset。GPIO 設定先確認 active-low/high。</div>
+<div class="callout warn"><strong>陷阱 3：HSB 下把「網路通」當成「感測器通」</strong>——25GbE link up 只代表實體層通，I2C 橋接與感測器仍要分開驗證。</div>
+
+<h2>6.13 練習</h2>
+<ol>
+<li>照 6.10 的 SOP 走完一次 bring-up，記錄每階段通過訊號。</li>
+<li>故意延後 RESET 釋放 1 秒，觀察「讀不到 ID」的現象。</li>
+<li>整理你平台的 dmesg 對照表，補上自家感測器的關鍵 log。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>Bring-up 四件事。</li><li>HSB 除錯三步。</li><li>照決策樹排解。</li><li>「資料進 GPU」驗證。</li></ul>

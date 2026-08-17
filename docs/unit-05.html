@@ -53,6 +53,62 @@ v4l2-ctl -d /dev/video0 --list-formats-ext</pre></div>
 </ol>
 
 
+<h2>5.9 深入原理：取流背後的狀態機與 buffer</h2>
+<p>V4L2 取流不是「一下就開始」，而是一串狀態：<strong>idle → initialized（設定 format）→ streaming（buffer 來回）</strong>。了解狀態才能看懂錯誤訊息。</p>
+<div class="pipe"><span class="step">S_FMT（設格式）</span><span class="arr">→</span><span class="step">REQBUFS（申請 buffer）</span><span class="arr">→</span><span class="step">QBUF（放入佇列）</span><span class="arr">→</span><span class="step">STREAMON</span><span class="arr">→</span><span class="step">DQ/QB 迴圈</span></div>
+<table>
+<tr><th>狀態</th><th>現象</th><th>錯誤徵兆</th></tr>
+<tr><td>streaming 前</td><td>無幀</td><td>—</td></tr>
+<tr><td>STREAMON 失敗</td><td>取流卡住</td><td>format 不被支援、driver 沒準備好</td></tr>
+<tr><td>buffer 不足</td><td>偶發掉幀</td><td>DQ 逾時、EIO</td></tr>
+</table>
+<div class="callout warn"><strong>陷阱：</strong>argus_camera 會自動完成上面全部狀態；v4l2-ctl 也會。但自己寫 app 時每個狀態都要確認回傳值——最常見的 bug 是忘了 QBUF 就 STREAMON。</div>
+
+<h2>5.10 Worked Example：把一幀 YUV 存檔並檢查</h2>
+<div class="demo-block"><div class="demo-label">取 1 幀 NV12 並驗證大小</div><pre>v4l2-ctl -d /dev/video0 \
+  --set-fmt-video=width=1280,height=800,pixelformat=NV12 \
+  --stream-mmap=3 --stream-count=1 --stream-to=frame.nv12
+<span class="hl-c"># 驗證檔案大小（NV12 = W×H×1.5 bytes）</span>
+ls -l frame.nv12                <span class="hl-c"># 期望 ≈ 1280×800×1.5 = 1,536,000 B</span>
+<span class="hl-c"># 檢查 fourcc 是否真的支援</span>
+v4l2-ctl -d /dev/video0 --list-formats-ext</pre></div>
+<div class="callout"><strong>為什麼驗證大小：</strong>檔案大小不符 = format 設定沒生效（可能 fallback 到別的模式）。大小對了才確定解析度/格式正確，之後分析才有意義。</div>
+
+<h2>5.11 疑難排解決策樹：取不到幀</h2>
+<div class="demo-block"><div class="demo-label">「v4l2-ctl 取流無輸出」</div><pre>1. media graph 完整且 link 啟用（unit-04）？
+   ├─ 否 → 先修 graph
+   └─ 是 ─┐
+2. format 在支援清單內？
+   ├─ 否 → 換 --list-formats-ext 內的值
+   └─ 是 ─┐
+3. STREAMON 回傳錯誤？
+   ├─ 是 → 看 dmesg（感測器/CSI 錯誤）
+   └─ 否 ─┐
+4. (HSB) Holoscan 端是否也開始收？
+   └─ 否 → 確認 host/sensor 兩端格式與通道一致</pre></div>
+
+<h2>5.12 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：解析度在兩端不一致</strong>——sensor mode 與 video format 的解析度不同，會裁切或填補。一律以感測器支援的 mode 為準。</div>
+<div class="callout warn"><strong>陷阱 2：fourcc 打錯</strong>——<code>NV12</code> 不是 <code>NV21</code>，<code>YUYV</code> 不是 <code>YU12</code>。寫錯時 driver 多半拒絕或 fallback，要回讀確認。</div>
+<div class="callout warn"><strong>陷阱 3：HSB 端與 host 端 buffer 設定不匹配</strong>——走 HSB 時，感測器端送出的 format 必須與 host 解包預期一致，否則解出的像素錯位（unit-08 詳述）。</div>
+
+<h2>5.13 深入：mmap vs DMABUF buffer 的選擇</h2>
+<p>V4L2 取流 buffer 主要有兩種：<strong>mmap</strong>（driver 分配、應用映射）與 <strong>DMABUF</strong>（外部/GPU buffer 傳給 driver）。NVIDIA 平台的 GPU 直連管線偏好 DMABUF，讓感測器資料直接落地 GPU 記憶體。</p>
+<table>
+<tr><th>方式</th><th>誰分配</th><th>適合</th></tr>
+<tr><td>mmap</td><td>driver</td><td>簡單取流、驗證</td></tr>
+<tr><td>DMABUF</td><td>應用/GPU</td><td>GPU 管線、零拷貝</td></tr>
+</table>
+<div class="callout warn"><strong>陷阱：</strong>Argus/Holoscan 底層常自動用 DMABUF。若你自己用 v4l2-ctl 取流時選了不支援的 buffer 方式，會回 ENOTTY 或 EINVAL。先用 <code>--stream-mmap</code> 驗證鏈路，再用 DMABUF 做效能。</div>
+
+<h2>5.14 練習</h2>
+<ol>
+<li>取一幀 NV12 並用檔案大小驗證格式正確。</li>
+<li>故意用不支援的解析度，觀察 driver 行為與錯誤訊息。</li>
+<li>用 argus_camera 與 v4l2-ctl 各取一次，比較兩者輸出差異。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>argus_camera / v4l2-ctl 取流。</li><li>「出圖 = 鏈路通」驗證。</li><li>HSB 走 Holoscan 管線概念。</li><li>Thor 與 Orin 取流共通與差異。</li></ul>

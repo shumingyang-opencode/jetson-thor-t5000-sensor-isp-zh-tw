@@ -46,6 +46,56 @@
 <div class="callout"><strong>重點：</strong>Thor 的「新」在 <strong>HSB</strong>——感測器資料不走短距離 CSI，而是乙太網路，支援大規模多感測器與即時融合。</div>
 
 
+<h2>1.3 深入原理：MIPI CSI-2 的位元層與時序</h2>
+<p>MIPI CSI-2 由 <strong>clock lane</strong>（DDR clock）與 <strong>data lanes</strong> 組成。Thor 的 CSI 介面提供最多 <strong>16 lanes</strong>，lane 以差動訊號（D-PHY）傳輸，在 clock 的雙沿（rising + falling）各送 1 bit，因此每條 lane 的資料速率是 clock 的兩倍。</p>
+<div class="pipe"><span class="step">Clock lane（DDR）</span><span class="arr">→</span><span class="step">data lane ×N</span><span class="arr">→</span><span class="step">每 clock 雙沿各 1 bit</span><span class="arr">→</span><span class="step">packet（header + payload + CRC）</span></div>
+<p>每個資料封包包含：<strong>Packet Header</strong>（資料型態 DT、word count）、<strong>Payload</strong>（像素資料）、<strong>Packet Footer</strong>（ECC/CRC）。讀取「hs-freq-range」或 CSI-2 速率時，遇到 CRC error 增加通常代表 <strong>訊號完整性</strong> 或 <strong>lane 數設定錯</strong>。</p>
+<table>
+<tr><th>參數</th><th>說明</th><th>檢查方式</th></tr>
+<tr><td>lane 數</td><td>感測器 → CSI 的資料通道數</td><td>DT 設定 / dmesg</td></tr>
+<tr><td>每 lane 速率</td><td>Gbps/lane，決定總頻寬</td><td>HSB 設定檔 / 示波器</td></tr>
+<tr><td>raw data type</td><td>如 RAW10/RAW12/YUV</td><td>v4l2 <code>--list-formats-ext</code></td></tr>
+</table>
+<div class="callout warn"><strong>常見陷阱：</strong>lane 數與 raw 位元深是兩個獨立設定。很多人改了解析度卻忘了同步改 lane 數 → 畫面撕裂或 <code>TX timeout</code>。</div>
+
+<h2>1.4 Worked Example：估算 16 lanes 到底能載多少</h2>
+<div class="demo-block"><div class="demo-label">頻寬估算（OV9281：1280×800 RAW10 @ 120 fps）</div><pre><span class="hl-c"># 每幀 raw bits</span>
+1280 × 800 × 10 bit = 10,240,000 bit ≈ 1.28 MB/frame
+<span class="hl-c"># 每秒資料量</span>
+1.28 MB × 120 fps = 153.6 MB/s ≈ 1.23 Gbps
+<span class="hl-c"># 用 4 lanes、每 lane 1 Gbps → 4 Gbps 綽綽有餘</span>
+<span class="hl-c"># 對照：16 lanes 全部只給一個感測器 = 浪費；16 lanes 是給多顆 + 高解析用的</span></pre></div>
+<div class="callout"><strong>直覺：</strong>單顆 OV9281 連 4 lanes 都用不滿。Thor 的 16 lanes 是「<strong>同時接多顆感測器</strong>」的總容量，不是單顆可用的上限。規劃時先算單顆需求，再除以 lane 容量決定配置。</div>
+
+<h2>1.5 疑難排解決策樹：三種路徑怎麼選</h2>
+<div class="demo-block"><div class="demo-label">「我的感測器該走哪條路？」決策樹</div><pre>1. 感測器離主機 < 30cm 且有現成 CSI 接頭？
+   ├─ 是 → MIPI CSI-2（延遲最低）
+   └─ 否 ─┐
+2. 需要超過 1 顆感測器同步、或部署在移動載具？
+   ├─ 是 → HSB（乙太網路，25GbE，可達數十米）
+   └─ 否 ─┐
+3. 只要快速原型、不要求低延遲/精確同步？
+   └─ 是 → USB 相機（最省事，犧牲效能）</pre></div>
+<p class="hint">⚠️ HSB 具體接頭數、速率上限以 NVIDIA 官方文件為準。</p>
+
+<h2>1.6 常見錯誤與陷阱</h2>
+<div class="callout warn"><strong>陷阱 1：把 HSB 當「無線」</strong>——HSB 仍是實體乙太網路線（25GbE），不是 Wi-Fi。延遲低於一般網路封包但不等於零。</div>
+<div class="callout warn"><strong>陷阱 2：忽略了 camera offload engine</strong>——資料先進 offload engine 才進 GPU，不是直接「倒進」GPU。offload 引擎負責解封包、重新排列，這層出錯會造成幀錯亂。</div>
+<div class="callout warn"><strong>陷阱 3：16 lanes 迷思</strong>——不是「插滿 16 條就好」，而是要每顆感測器各自設定對應的 lane 數。lane 數不匹配是 top-3 常見影像錯誤。</div>
+
+<h2>1.7 深入：camera offload engine 在資料流中的位置</h2>
+<p>camera offload engine 是 Thor 把感測器資料「收進來、整理好」的第一站：負責<strong>解封包</strong>（HSB 的乙太網路封包或 CSI-2 packet）、<strong>重新排列</strong>成連續 buffer、必要時做 <strong>格式轉換</strong>，再交給 GPU。它不負責影像品質——品質是 ISP 的事（unit-07 起）。</p>
+<div class="pipe"><span class="step">HSB 封包（乙太網路）</span><span class="arr">→</span><span class="step">解封包</span><span class="arr">→</span><span class="step">排列成 buffer</span><span class="arr">→</span><span class="step">GPU/ISP</span></div>
+<div class="callout warn"><strong>除錯角度：</strong>「畫面錯亂但單幀圖看起來對」→ 通常是 offload/排列層出錯；「單幀就錯」→ 是感測器或 ISP 層。從這層開始分診斷，能省大量時間。</div>
+
+<h2>1.8 練習</h2>
+<ol>
+<li>用 OV9281 規格（1280×800, RAW10, 120 fps）估算每秒資料量。</li>
+<li>說明為什麼 16 lanes 比單一高速 lane 更適合多感測器。</li>
+<li>畫出 MIPI、HSB、USB 三種路徑各自的「資料進 GPU 前的第一個處理單元」。</li>
+</ol>
+
+
   <div class="outcome">
     <strong>看完這單元你應該能說出：</strong>
     <ul><li>Thor 三種感測器路徑。</li><li>MIPI CSI-2 16 lanes 能力。</li><li>HSB（感測器走乙太網路）意義。</li><li>Jetson 堆疊與 Holoscan 分工。</li></ul>

@@ -235,6 +235,77 @@ Step 8  記錄
   <li>- [ ] 我能說明 Thor 與 RPi5 在「多感測器規模」上的差異原因。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>1.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>VI_CFG_CSI_IPCx</code></td><td><code>0x0c800000+0x100*n</code></td><td>VI CSI Port 配置</td><td><code>bit[3:0]=lane數, bit[5:4]=data type</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 VI_CFG_CSI_IPCx 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x0c800000+0x100*n</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值</span>
+$ new_value=$(current_value | 0x0001)
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x0c800000+0x100*n</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證讀回值與預期一致</span>
+$ devmem2 <span class="hl-n">0x0c800000+0x100*n</span> w
+$ [ "$(devmem2 <span class="hl-n">0x0c800000+0x100*n</span> w | grep Read)" = "expected" ] && echo "PASS" || echo "FAIL"</pre></div>
+
+  <h2>1.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：相機路徑選擇失敗</div><pre>1. `dmesg | grep -i csi` 出現 "no device"？
+   ├─ 檢查 device tree overlay 是否載入：`cat /proc/device-tree/soc/csi*/status`
+   │  ├─ "okay" → 驅動問題，查 module 版本
+   │  └─ "disabled" → DT overlay 未 apply，重跑 sudo ubootOverlayApply
+   └─ DT 正常但仍 no device → 硬體層：MIPI 排線接觸、lane 接線對照表</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：HSB 乙太網路感測器無法連線</div><pre>1. `ip link show` 看 25GbE介面是否 UP？
+   ├─ DOWN → cable/switch 問題；換線或直連測試
+   └─ UP → ping 感測器 IP
+      ├─ timeout → 防火牆或 VLAN 設定；檢查 `sudo iptables -L`
+      └─ OK → port 不匹配；確認 Holoscan sensor driver config 的 port</pre></div>
+
+  <h2>1.20 量測驗證完整 SOP</h2>
+  <p>Thor 相機子系統總驗證 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>確認硬件連接</td><td><code>MIPI 排線、25GbE cable、電源供應</code></td><td>排線無鬆動、cable LED 亮</td></tr>
+      <tr><td>Step 2</td><td>載入 DT overlay</td><td><code>`sudo ubootOverlayApply` + 重開機</code></td><td>dmesg 出現 CSI/HSB 初始化訊息</td></tr>
+      <tr><td>Step 3</td><td>列出 V4L2 裝置</td><td><code>`v4l2-ctl --list-devices`</code></td><td>出現 /dev/video0 以上裝置</td></tr>
+      <tr><td>Step 4</td><td>列出支援格式</td><td><code>`v4l2-ctl -d /dev/video0 --list-formats-ext`</code></td><td>RAW10/RAW12 出現</td></tr>
+      <tr><td>Step 5</td><td>取一幀</td><td><code>`v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=1 --stream-to=frame.raw`</code></td><td>非零位元組檔案</td></tr>
+      <tr><td>Step 6</td><td>目視檢查</td><td><code>`dd if=frame.raw bs=1 count=100 | xxd`</code></td><td>Header 合理（DT=0x2B for RAW10）</td></tr>
+      <tr><td>Step 7</td><td>HSB 感測器連通測試</td><td><code>`ping <sensor_ip> && nc -zv <sensor_ip> <port>`</code></td><td>ping OK、port open</td></tr>
+      <tr><td>Step 8</td><td>GPU 路徑驗證</td><td><code>跑 Holoscan sample pipeline 確認 frame 進 GPU</code></td><td>nvdec/nvenc 記憶體有分配</td></tr>
+  </table>
+
+  <h2>1.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>感測器路徑</td><td>CSI-2 + HSB（乙太網路）</td><td>CSI-2（2 port）</td><td>CSI-2（1 port）</td><td>CSI-2 + GMSL</td></tr>
+<tr><td>最大 lane 數</td><td>16</td><td>4（2×2）</td><td>2</td><td>4–8</td></tr>
+<tr><td>HSB 遠距</td><td>✅</td><td>❌</td><td>❌</td><td>⚠️</td></tr>
+<tr><td>DT overlay 方式</td><td>`ubootOverlayApply`</td><td>自動（dtoverlay=）</td><td>bootscript 或 armbianEnv</td><td>hardkernel dtb</td></tr>
+<tr><td>V4L2 工具完整度</td><td>完整</td><td>完整</td><td>部分</td><td>完整</td></tr>
+<tr><td>支援同步取流</td><td>✅</td><td>⚠️</td><td>❌</td><td>✅</td></tr>
+<tr><td>典型 bring-up 時間</td><td>2–4 hr（含 DT overlay）</td><td>30 min</td><td>1–2 hr（DT 手改）</td><td>1–2 hr</td></tr>
+  </table>
+
+  <h2>1.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「平台相機生態總覽」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能在 Thor 上執行完整的 8 步驗證 SOP，並記錄每步預期輸出。</li>
+    <li>- [ ] 我能在 `devmem2` 中讀取 VI_CFG_CSI_IPCx 的值，並判斷 lane 數設定。</li>
+    <li>- [ ] 我能畫出從「感測器掛了」到「根本原因」的 3 層診斷路徑。</li>
+    <li>- [ ] 我能比較四平台在「DT overlay 方式」與「支援同步取流」上的差異。</li>
+    <li>- [ ] 我能完成一次 bring-up checklist，從接線到 GPU pipeline 全驗證。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

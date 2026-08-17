@@ -307,6 +307,81 @@ Step 6 融合輸出驗收
   <li>- [ ] 我能寫出可重複執行的多感測器 bring-up + 調校 SOP。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>16.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>MULTI_SENSOR_SYNC</code></td><td><code>0x0c800100</code></td><td>多感測器同步控制</td><td><code>bit[0]=master sync enable, bit[3:1]=sync source</code></td></tr>
+      <tr><td><code>HSB_CHANNEL_MAP</code></td><td><code>0x0c0b0000</code></td><td>HSB 通道映射</td><td><code>bit[7:0]=channel_id, bit[15:8]=sensor_port</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 MULTI_SENSOR_SYNC 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x0c800100</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x0c800100</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x0c800100</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x0c800100</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>16.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：多感測器同步失敗</div><pre>1. Frame timestamp 不對齊？
+   ├─ Sync source 設錯 → 檢查 MULTI_SENSOR_SYNC bit[3:1]
+   └─ 感測器端不支持 hardware sync → 用 software timestamp 對齊
+2. 有些感測器快有些慢？
+   └─ Frame rate 不一致 → 確認所有感測器的 PLL 設定相同</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：HSB 多相機 bandwidth 不足</div><pre>1. 25GbE saturation？
+   ├─ 單顆相機頻寬已超 25GbE → 降 resolution 或 fps
+   └─ 多顆總和超限 → 減少同時 streaming 的感測器數
+2. Frame drop 在特定相機？
+   └─ 該 camera 的 HSB channel buffer 不足 → 增加 buffer</pre></div>
+
+  <h2>16.20 量測驗證完整 SOP</h2>
+  <p>多感測器 Bring-up 完整 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>單顆先確認</td><td><code>每顆感測器逐個單獨測試</code></td><td>每顆都能 stream</td></tr>
+      <tr><td>Step 2</td><td>I2C 位址分配</td><td><code>確認每顆有唯一 I2C 地址</code></td><td>`i2cdetect` 看到所有地址</td></tr>
+      <tr><td>Step 3</td><td>DT 設定多 sensor</td><td><code>修改 device tree 新增 sensor node</code></td><td>dmesg 出現多個 sensor</td></tr>
+      <tr><td>Step 4</td><td>同步測試</td><td><code>啟用 hardware sync，比較 timestamp</code></td><td>Δt < 1ms</td></tr>
+      <tr><td>Step 5</td><td>HSB 通道設定</td><td><code>設定 HSB channel map，每颗 sensor 對應一通道</code></td><td>`ping` 各 sensor IP</td></tr>
+      <tr><td>Step 6</td><td>Bandwidth 驗證</td><td><code>全 sensor 同時 stream，監控 drop rate</code></td><td>0 frame drop</td></tr>
+      <tr><td>Step 7</td><td>延遲一致性</td><td><code>測量各 sensor 的 sensor→display 延遲</code></td><td>各通道延遲差 < 5ms</td></tr>
+  </table>
+
+  <h2>16.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>最大感測器數</td><td>6+（16 lanes）</td><td>2（2 CSI port）</td><td>1（1 CSI port）</td><td>4–6（GMSL）</td></tr>
+<tr><td>硬體 sync 支援</td><td>✅</td><td>⚠️</td><td>❌</td><td>✅</td></tr>
+<tr><td>HSB 乙太網路</td><td>✅</td><td>N/A</td><td>N/A</td><td>N/A</td></tr>
+<tr><td>多 sensor bandwidth</td><td>~20 Gbps total</td><td>~4 Gbps total</td><td>~1 Gbps</td><td>~10 Gbps</td></tr>
+<tr><td>sensor fusion pipeline</td><td>Holoscan graph</td><td>OpenCV 多 stream</td><td>N/A</td><td>CUDA 多 stream</td></tr>
+<tr><td>典型 multi-sensor 應用</td><td>AV/robotics 360°</td><td>stereo vision</td><td>Single cam only</td><td>ADAS multi-cam</td></tr>
+  </table>
+
+  <h2>16.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「多感測器與實作案例」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能設定 MULTI_SENSOR_SYNC 並驗證 timestamp 對齊（Δt < 1ms）。</li>
+    <li>- [ ] 我能配置 HSB_CHANNEL_MAP 並同時 stream 3+ 感測器。</li>
+    <li>- [ ] 我能完成多感測器 7 步 bring-up SOP。</li>
+    <li>- [ ] 我能比較四平台的多感測器能力與同步方式。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

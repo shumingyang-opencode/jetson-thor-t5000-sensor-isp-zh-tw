@@ -229,6 +229,81 @@ Step 6 記錄
   <li>- [ ] 我能比較 Thor 與 RPi5 的 ISP 可調性差異。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>7.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>ISP_BLC_OFFSET</code></td><td><code>0x00140000</code></td><td>Black Level Correction 偏移</td><td><code>bit[15:0] = BLC offset per channel (R/Gr/Gb/B)</code></td></tr>
+      <tr><td><code>ISP_BPC_CTRL</code></td><td><code>0x00140040</code></td><td>Bad Pixel Correction 控制</td><td><code>bit[0]=enable, bit[1]=method (median/interpolation)</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 ISP_BLC_OFFSET 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x00140000</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x00140000</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x00140000</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x00140000</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>7.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：ISP 輸出異常色彩</div><pre>1. 色彩偏移或反色？
+   ├─ CCM matrix 未載入 → 確認 ISP tuning 文件路徑
+   └─ Gamma curve 設定錯 → 進 visualizer 調 LUT
+2. 暗角或亮角？
+   ├─ LSC table 不對 → 重拍白卡生成新 table
+   └─ 鏡頭與 LSC table 不匹配 → 確認 lens 型號</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：ISP 處理延遲過高</div><pre>1. pipeline latency > 20ms？
+   ├─ ISP clock 頻率太低 → 檢查 `cat /sys/kernel/debug/bpmp/debug/clk/isp/rate`
+   └─ ISP block 過多 → 關閉不需要的功能（HDR、Nr、LSC 可暫關測試）</pre></div>
+
+  <h2>7.20 量測驗證完整 SOP</h2>
+  <p>ISP 管線完整驗證 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>raw 輸入確認</td><td><code>先確保 sensor raw streaming 正常</code></td><td>raw 檔非零</td></tr>
+      <tr><td>Step 2</td><td>BLC 驗證</td><td><code>拍暗場，量測四通道 black level</code></td><td>R/Gr/Gb/B 接近（±2 DN）</td></tr>
+      <tr><td>Step 3</td><td>BPC 驗證</td><td><code>拍白卡，放大檢視 dead pixel</code></td><td>無明顯亮/暗點</td></tr>
+      <tr><td>Step 4</td><td>LSC 驗證</td><td><code>拍白板四角，量測亮度均勻度</code></td><td>四角差 < 10%</td></tr>
+      <tr><td>Step 5</td><td>Demosaic 驗證</td><td><code>拍 ISO 12233 chart</code></td><td>無 moiré / false color</td></tr>
+      <tr><td>Step 6</td><td>CCM + AWB 驗證</td><td><code>拍白卡 + X-Rite ColorChecker</code></td><td>ΔE < 3</td></tr>
+      <tr><td>Step 7</td><td>Gamma 驗證</td><td><code>拍 21 級灰階 chart</code></td><td>tone curve 符合預期</td></tr>
+      <tr><td>Step 8</td><td>NR + 銳化</td><td><code>暗場 + 細節 chart</code></td><td>雜訊抑制但不糊</td></tr>
+  </table>
+
+  <h2>7.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>ISP 處理能力</td><td>Blackwell ISP: 2 GOPS</td><td>博通 BCM2835 ISP</td><td>無獨立 ISP（CPU soft）</td><td>NVIDIA ISP: 1.5 GOPS</td></tr>
+<tr><td>BLC 精度</td><td>12-bit per channel</td><td>10-bit</td><td>N/A（raw only）</td><td>12-bit</td></tr>
+<tr><td>BPC 方法</td><td>Median + ML inference</td><td>Fixed pattern</td><td>N/A</td><td>Median + Interpolation</td></tr>
+<tr><td>LSC table 格式</td><td>5×5 grid × 4 channels</td><td>17×13 grid</td><td>N/A</td><td>16×12 grid</td></tr>
+<tr><td>CCM 矩陣大小</td><td>3×3 + offset</td><td>3×3</td><td>N/A</td><td>3×3 + offset</td></tr>
+<tr><td>ISP tuning 工具</td><td>NVIDIA ISP Visualizer</td><td>raspistill --settings</td><td>N/A</td><td>NVIDIA ISP Visualizer</td></tr>
+  </table>
+
+  <h2>7.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「ISP 管線深入」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能手動設定 ISP_BLC_OFFSET 並量測 dark frame 四通道偏差。</li>
+    <li>- [ ] 我能啟用/停用 ISP_BPC_CTRL 並比較 dead pixel 修正效果。</li>
+    <li>- [ ] 我能完成 ISP 管線 8 步驗證，並在每個環節拍照存檔。</li>
+    <li>- [ ] 我能比較四平台的 ISP 處理能力與 tuning 工具。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

@@ -257,6 +257,85 @@ Step 5 記錄
   <li>- [ ] 我能區分「網路通」與「感測器通」。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>6.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>CSI_ERR_COUNTER</code></td><td><code>0x0c0a0020</code></td><td>CSI 錯誤計數器</td><td><code>bit[15:8]=CRC error count, bit[7:0]=ECC error count</code></td></tr>
+      <tr><td><code>VI_STATUS</code></td><td><code>0x0c800004</code></td><td>VI 狀態暫存器</td><td><code>bit[0]=streaming, bit[3]=fifo_overflow</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 CSI_ERR_COUNTER 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x0c0a0020</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x0c0a0020</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x0c0a0020</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x0c0a0020</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>6.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：CSI 錯誤爆量</div><pre>1. CRC error 持續增加？
+   ├─ 物理層：重新拔插排線、更換排線
+   ├─ 訊號完整性：降低 lane 速率（修改 DT 的 clock-frequency）
+   └─ ESD 事件：sensor reset pin 接 GPIO，加 ESD 恢復邏輯
+2. ECC error？
+   ├─ Packet header 損壞 → 物理層問題
+   └─ 但 CRC OK → 可能是 MIPI 協議層 mismatch</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：FIFO overflow / frame drop</div><pre>1. VI_STATUS bit[3] = 1（overflow）？
+   ├─ ISP 處理太慢 → 減少 resolution 或關閉不需要的 ISP block
+   └─ DDR 帶寬不足 → 檢查 `cat /sys/kernel/debug/bpmp/debug/clk/vi/rate`
+2. Frame drop 但無 overflow？
+   ├─ 軟體 queue 滿了 → 增加 V4L2 buffer 數
+   └─ Sensor 端 frame rate 不穩 → 檢查 sensor PLL 設定</pre></div>
+
+  <h2>6.20 量測驗證完整 SOP</h2>
+  <p>Bring-up 完整除錯 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>最小配置測試</td><td><code>只用 1 lane, 最低 resolution, 1 sensor</code></td><td>排除 lane/scale 問題</td></tr>
+      <tr><td>Step 2</td><td>I2C 通路驗證</td><td><code>`i2cget -y 1 0x60 0x300A w`</code></td><td>Chip ID 正確</td></tr>
+      <tr><td>Step 3</td><td>Streaming 測試</td><td><code>`v4l2-ctl --stream-mmap --stream-count=1`</code></td><td>raw 檔非零</td></tr>
+      <tr><td>Step 4</td><td>CSI error 監控</td><td><code>`watch -n 1 'devmem2 0x0c0a0020 w'`</code></td><td>error count = 0</td></tr>
+      <tr><td>Step 5</td><td>VI overflow 監控</td><td><code>`devmem2 0x0c800004 w`</code></td><td>bit[3] = 0</td></tr>
+      <tr><td>Step 6</td><td>逐步升級</td><td><code>2 lane → 4 lane → 更高 resolution</code></td><td>每步確認無 error</td></tr>
+      <tr><td>Step 7</td><td>壓力測試</td><td><code>`v4l2-ctl --stream-mmap --stream-count=1000`</code></td><td>0 frame drop</td></tr>
+      <tr><td>Step 8</td><td>溫度監控</td><td><code>`tegrastats` 看 thermal</code></td><td>SoC < 85°C</td></tr>
+  </table>
+
+  <h2>6.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>CSI error 監控</td><td>`devmem2` + register dump</td><td>`dmesg | grep csi`</td><td>`dmesg | grep csi`</td><td>`devmem2` + register dump</td></tr>
+<tr><td>I2C 除錯工具</td><td>`i2cget/set` + 腳本</td><td>`i2cget/set`</td><td>`i2cget/set`</td><td>`i2cget/set`</td></tr>
+<tr><td>Frame drop 偵測</td><td>V4L2 sequence number</td><td>`libcamera-hello --frames 100`</td><td>`v4l2-ctl stream count`</td><td>V4L2 sequence number</td></tr>
+<tr><td>Power 控制粒度</td><td>Per-sensor GPIO + regulator</td><td>GPIO only</td><td>GPIO only</td><td>Per-sensor + GMSL</td></tr>
+<tr><td>ESD 恢復機制</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>典型 bring-up 時間</td><td>2–4 hr</td><td>30 min</td><td>1–2 hr</td><td>1–2 hr</td></tr>
+  </table>
+
+  <h2>6.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「Sensor Bring-up 與除錯」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能用 devmem2 讀取 CSI error counter 並判斷錯誤類型。</li>
+    <li>- [ ] 我能從 FIFO overflow 追蹤到根本原因（ISP vs DDR vs sensor）。</li>
+    <li>- [ ] 我能完成 8 步 bring-up 除錯 SOP。</li>
+    <li>- [ ] 我能比較四平台的 ESD 恢復機制。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

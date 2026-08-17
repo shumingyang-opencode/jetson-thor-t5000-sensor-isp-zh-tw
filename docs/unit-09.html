@@ -260,6 +260,78 @@ Step 6 記錄
   <li>- [ ] 我能評估「RPi5 調校搬到 Thor」的風險。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>9.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>ISP_POWER_CTRL</code></td><td><code>0x00140004</code></td><td>ISP 電源控制</td><td><code>bit[0]=ISP_en, bit[1]=clock gating, bit[4]=power domain switch</code></td></tr>
+      <tr><td><code>TEGRA_VIDEO_CTRL</code></td><td><code>0x0c800000</code></td><td>Video Engine 控制</td><td><code>bit[0]=enable, bit[3:2]=input source</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 ISP_POWER_CTRL 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x00140004</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x00140004</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x00140004</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x00140004</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>9.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：ISP 效能不足</div><pre>1. 輸出 frame rate 低於預期？
+   ├─ ISP clock 太低 → 調升 ISP clock rate
+   └─ ISP pipeline 太長 → 關閉不需要的 block
+2. GPU 顯示卡頓但 ISP 處理正常？
+   ├─ GPU pipeline 問題 → 檢查 CUDA stream 同步
+   └─ Display queue 滿 → 增加 display buffer</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：ISP 資源衝突</div><pre>1. 第二顆相機無法啟用？
+   ├─ ISP 硬體通道已滿 → 確認 ISP 有幾個 VPP（Thor: 4, Orin: 2）
+   └─ DDR 帶寬不足 → 降低兩顆相機的 resolution</pre></div>
+
+  <h2>9.20 量測驗證完整 SOP</h2>
+  <p>跨平台 ISP 架構對比驗證 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>確認 ISP 有無</td><td><code>`lspci | grep -i isp` 或 `/proc/device-tree/`</code></td><td>Thor/Orin: 有, RPi/OPi: 無獨立 ISP</td></tr>
+      <tr><td>Step 2</td><td>ISP clock 測量</td><td><code>`cat /sys/kernel/debug/bpmp/debug/clk/isp/rate`</code></td><td>Thor: 600MHz, Orin: 408MHz</td></tr>
+      <tr><td>Step 3</td><td>同時跑 2 路 camera</td><td><code>各平台接 2 顆 camera 並同時 stream</code></td><td>Thor: OK, Orin: OK, RPi: 有限</td></tr>
+      <tr><td>Step 4</td><td>ISP tuning 能力</td><td><code>比較各平台 tuning 工具與參數數量</code></td><td>Thor > Orin > RPi > OPi</td></tr>
+      <tr><td>Step 5</td><td>輸出品質比較</td><td><code>用同一感測器在各平台拍同一場景</code></td><td>色彩/動態範圍對比</td></tr>
+  </table>
+
+  <h2>9.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>ISP 硬體</td><td>Blackwell ISP（2 GOPS）</td><td>博通 ISP（有限）</td><td>無獨立 ISP</td><td>NVIDIA ISP（1.5 GOPS）</td></tr>
+<tr><td>ISP pipeline 深度</td><td>BLC→BPC→LSC→LDC→Demosaic→CCM→Gamma→NR→Sharpen</td><td>BLC→Demosaic→CCM→Gamma</td><td>軟體 only</td><td>BLC→BPC→LSC→Demosaic→CCM→Gamma→NR→Sharpen</td></tr>
+<tr><td>VPP 通道數</td><td>4</td><td>2（共享）</td><td>0</td><td>2</td></tr>
+<tr><td>ISP clock 範圍</td><td>400–800 MHz</td><td>200–400 MHz</td><td>N/A</td><td>200–600 MHz</td></tr>
+<tr><td>硬體 LDC</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>ISP 功耗</td><td>~1.5W</td><td>~0.5W</td><td>N/A</td><td>~1W</td></tr>
+  </table>
+
+  <h2>9.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「各平台 ISP 架構差異」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能描述 Thor Blackwell ISP 的完整 pipeline 順序。</li>
+    <li>- [ ] 我能測量 ISP clock rate 並與其他平台比較。</li>
+    <li>- [ ] 我能同時跑 2 路 camera 並確認 ISP 資源分配。</li>
+    <li>- [ ] 我能比較四平台的 ISP 硬體能力與功耗。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

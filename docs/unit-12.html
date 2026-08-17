@@ -286,6 +286,81 @@ Step 6 記錄
   <li>- [ ] 我能驗證四角亮度差 &lt; 5% 且無棋盤格。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>12.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>LSC_TABLE_ADDR</code></td><td><code>0x00140300</code></td><td>LSC table 載入位址</td><td><code>bit[15:0] = table offset, write 0x01 to trigger load</code></td></tr>
+      <tr><td><code>LSC_STRENGTH</code></td><td><code>0x00140304</code></td><td>LSC 強度控制</td><td><code>bit[7:0] = strength (0=off, 255=full)</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 LSC_TABLE_ADDR 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x00140300</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x00140300</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x00140300</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x00140300</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>12.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：暗角修正不足</div><pre>1. 四角仍暗？
+   ├─ LSC table 未載入 → 確認 LSC_TABLE_ADDR trigger bit
+   └─ table 與 lens 不匹配 → 重新拍白板生成 table
+2. 中心過亮（over-correction）？
+   └─ LSC_STRENGTH 太高 → 降到 0x80–0xC0</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：LSC table 生成失敗</div><pre>1. 白板有陰影？
+   ├─ 光源不均勻 → 用 diffuser 或 lightbox
+   └─ 白板有紋路 → 用專業 white target
+2. 四角量測值不合理？
+   └─ ROI 選取不對 → 確認選在四角角落、避開邊緣 dark frame</pre></div>
+
+  <h2>12.20 量測驗證完整 SOP</h2>
+  <p>LSC 完整校正與驗證 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>拍攝白板</td><td><code>均勻光源（lightbox），全畫面白色</code></td><td>曝光不飽和</td></tr>
+      <tr><td>Step 2</td><td>量測四角 + 中心</td><td><code>ROI 各取 100×100 pixel 平均值</code></td><td>記錄 DN 值</td></tr>
+      <tr><td>Step 3</td><td>計算暗角比</td><td><code>(center - corner) / center × 100%</code></td><td>期望 < 20%</td></tr>
+      <tr><td>Step 4</td><td>生成 LSC table</td><td><code>ISP Visualizer 或腳本自動生成</code></td><td>5×5 grid × 4 channels</td></tr>
+      <tr><td>Step 5</td><td>載入 table</td><td><code>寫入 LSC_TABLE_ADDR + trigger</code></td><td>table 載入成功</td></tr>
+      <tr><td>Step 6</td><td>驗證修正效果</td><td><code>重拍白板，重複 Step 2</code></td><td>四角差 < 5%</td></tr>
+      <tr><td>Step 7</td><td>強度微調</td><td><code>調 LSC_STRENGTH，找最佳值</code></td><td>中心不過亮、四角不暗</td></tr>
+  </table>
+
+  <h2>12.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>LSC grid 大小</td><td>5×5 × 4ch（可調）</td><td>17×13（固定）</td><td>N/A</td><td>16×12（固定）</td></tr>
+<tr><td>LSC table 生成</td><td>ISP Visualizer（GUI）</td><td>`raspistill` 以 12-bit 抓</td><td>N/A</td><td>ISP Visualizer</td></tr>
+<tr><td>LSC 強度控制</td><td>✅</td><td>✅</td><td>N/A</td><td>✅</td></tr>
+<tr><td>自動 LSC 校正</td><td>✅</td><td>❌</td><td>N/A</td><td>✅</td></tr>
+<tr><td>LSC + lens profiles</td><td>✅</td><td>❌</td><td>N/A</td><td>⚠️</td></tr>
+<tr><td>驗證工具</td><td>ColorChecker + 角落量測</td><td>白板 DN 比較</td><td>N/A</td><td>ColorChecker + 角落量測</td></tr>
+  </table>
+
+  <h2>12.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「鏡頭陰影校正（LSC）」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能手動設定 LSC_STRENGTH 並觀察暗角修正變化。</li>
+    <li>- [ ] 我能從白板影像自動生成 LSC table 並載入。</li>
+    <li>- [ ] 我能完成 7 步 LSC 校正 SOP。</li>
+    <li>- [ ] 我能比較四平台的 LSC grid 大小與自動化程度。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

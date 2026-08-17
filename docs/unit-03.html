@@ -239,6 +239,83 @@ Step 7 記錄
   <li>- [ ] 我能用批次寫入策略降低 HSB 的 I2C 往返延遲。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>3.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>SCCB_ID_REG</code></td><td><code>0x0100 (OV9281)</code></td><td>Chip ID 讀取</td><td><code>i2cget -y 1 0x60 0x0100 → expected 0x9281</code></td></tr>
+      <tr><td><code>SCCB_STREAM_REG</code></td><td><code>0x0100 (OV9281)</code></td><td>Streaming On/Off</td><td><code>bit[0]=1 start, bit[0]=0 stop</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 SCCB_ID_REG 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x0100 (OV9281)</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x0100 (OV9281)</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x0100 (OV9281)</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x0100 (OV9281)</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>3.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：I2C/SCCB 通訊失敗</div><pre>1. `i2cdetect -y 1` 看不到 device？
+   ├─ 地址 0x60 不見 → 檢查 SCCB/I2C SDA/SCL 接線、上拉電阻（2.2kΩ）
+   ├─ 0x60 出現但多個地址 → bus 仲裁問題，減少 pull-up
+   └─ 全掃描 0x03–0x77 都有 → bus stuck，power cycle 感測器
+2. address 可見但讀 chip ID 失敗？
+   ├─ `i2cget` 返回 0xFF → 設備未初始化，需先 strobe/reset pin
+   └─ 返回 0x00 → power-on reset 未完成，等 100ms 再讀</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：Register 讀值不預期</div><pre>1. 讀值 = 0xFF（R/W register）？
+   ├─ 設備地址錯 → 確認 OV9281 的 7-bit addr = 0x60
+   └─ 16-bit sub-address 未送對 → 檢查 `i2cset` 格式
+2. 寫入後讀回不同？
+   ├─ 某些 register 寫後需等待 → 加 `usleep(1000)` 再讀
+   └─ register 是 write-only → 查 datasheet 確認 R/W 屬性</pre></div>
+
+  <h2>3.20 量測驗證完整 SOP</h2>
+  <p>I2C/SCCB 通訊驗證 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>掃描 bus</td><td><code>`sudo i2cdetect -y 1`</code></td><td>0x60 出現（OV9281）</td></tr>
+      <tr><td>Step 2</td><td>讀取 Chip ID</td><td><code>`sudo i2cget -y 1 0x60 0x300A w`</code></td><td>返回 0x9281</td></tr>
+      <tr><td>Step 3</td><td>寫入測試</td><td><code>`sudo i2cset -y 1 0x60 0x0103 0x01`（sw reset）</code></td><td>感測器 reset</td></tr>
+      <tr><td>Step 4</td><td>等待 reset</td><td><code>`sleep 0.1`</code></td><td>100ms 後感測器就緒</td></tr>
+      <tr><td>Step 5</td><td>再讀 ID 確認</td><td><code>`sudo i2cget -y 1 0x60 0x300A w`</code></td><td>再次 0x9281</td></tr>
+      <tr><td>Step 6</td><td>批量 dump</td><td><code>`for i in $(seq 0x3000 0x30FF); do printf "0x%04X: " $i; sudo i2cget -y 1 0x60 $i w; done`</code></td><td>建立 register baseline</td></tr>
+  </table>
+
+  <h2>3.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>I2C bus 數量</td><td>3–4 bus（1 dedicated to sensors）</td><td>1 bus（GPIO 驅動）</td><td>2 bus</td><td>2–3 bus</td></tr>
+<tr><td>SCCB/I2C 速率</td><td>100/400 kHz</td><td>100 kHz</td><td>100/400 kHz</td><td>100/400 kHz</td></tr>
+<tr><td>韌體層 I2C 控制</td><td>NVIDIA Camera HAL</td><td>V4L2 direct</td><td>V4L2 / libi2c</td><td>NVIDIA Camera HAL</td></tr>
+<tr><td>I2C 除錯工具</td><td>`i2cdetect`, `i2cget/set`</td><td>`i2cdetect`, `i2cget/set`</td><td>`i2cdetect`, `i2cget/set`</td><td>`i2cdetect`, `i2cget/set`</td></tr>
+<tr><td>多感測器位址衝突處理</td><td>Hardware MUX / 分 bus</td><td>分 bus（2 bus available）</td><td>Software MUX</td><td>Hardware MUX</td></tr>
+<tr><td>I2C 傳輸失敗率目標</td><td>< 0.01%</td><td>< 0.1%</td><td>< 0.1%</td><td>< 0.01%</td></tr>
+  </table>
+
+  <h2>3.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「感測器通訊介面」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能用 `i2cdetect` 掃描出 OV9281 的 I2C 位址。</li>
+    <li>- [ ] 我能手動讀寫 register 並驗證 reset 流程。</li>
+    <li>- [ ] 我能建立完整的 register dump baseline。</li>
+    <li>- [ ] 我能比較四平台的 I2C bus 架構差異。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

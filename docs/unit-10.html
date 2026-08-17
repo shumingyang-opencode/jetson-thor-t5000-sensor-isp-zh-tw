@@ -288,6 +288,83 @@ Step 6 上限測試
   <li>- [ ] 我能由 motion blur 需求反推曝光上限。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>10.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>SENSOR_EXPOSURE_REG</code></td><td><code>0x3500/0x3501/0x3502 (OV9281)</code></td><td>Exposure time</td><td><code>bit[19:16]=upper, bit[15:8]=mid, bit[7:0]=lower, 單位 line</code></td></tr>
+      <tr><td><code>AE_CONVERGENCE_STATUS</code></td><td><code>0x00100010</code></td><td>AE 收斂狀態</td><td><code>bit[0]=converged, bit[1]=over_exposed, bit[2]=under_exposed</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 SENSOR_EXPOSURE_REG 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x3500/0x3501/0x3502 (OV9281)</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x3500/0x3501/0x3502 (OV9281)</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x3500/0x3501/0x3502 (OV9281)</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x3500/0x3501/0x3502 (OV9281)</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>10.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：AE 收斂失敗</div><pre>1. 曝光值不動？
+   ├─ AE 被鎖定 → 檢查 `v4l2-ctl --set-ctrl=exposure_auto=1`（manual）
+   └─ AE 正常但收斂慢 → 收斂速度參數太保守，調 AE speed factor
+2. 曝光震盪（忽亮忽暗）？
+   ├─ AE 步進太大 → 減小 step size
+   └─ 目標亮度設定不當 → 調 bright target 值</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：曝光時間異常</div><pre>1. 曝光時間 > frame duration？
+   ├─ sensor 降為 partial exposure → 檢查 line_length 與 frame_length
+   └─ 設定值超出 sensor range → clamp 到 max exposure
+2. 曝光時間 = 0？
+   ├─ AE 未啟動 → 確認 AE mode
+   └─ 軟體 bug → 檢查 Argus 的 exposure 計算邏輯</pre></div>
+
+  <h2>10.20 量測驗證完整 SOP</h2>
+  <p>AE 完整量測與調校 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>設定 baseline</td><td><code>手動 exposure = 10ms, gain = 1×</code></td><td>固定光源 D65</td></tr>
+      <tr><td>Step 2</td><td>記錄 histogram</td><td><code>`v4l2-ctl -d /dev/video0 --list-ctrls` + dump frame</code></td><td>histogram 峰值在中間</td></tr>
+      <tr><td>Step 3</td><td>啟用 AE</td><td><code>`v4l2-ctl --set-ctrl=exposure_auto=3`（aperture priority）</code></td><td>AE 開始收斂</td></tr>
+      <tr><td>Step 4</td><td>監控收斂</td><td><code>每 100ms 記錄 exposure/gain 值</code></td><td>2–5 秒內收斂</td></tr>
+      <tr><td>Step 5</td><td>驗證穩態</td><td><code>靜態場景持續 30 秒</code></td><td>exposure 變化 < ±5%</td></tr>
+      <tr><td>Step 6</td><td>動態測試</td><td><code>突然遮擋 50% 畫面</code></td><td>re-converge < 1 秒</td></tr>
+      <tr><td>Step 7</td><td>flicker 測試</td><td><code>100Hz 日光燈下</code></td><td>無 banding</td></tr>
+  </table>
+
+  <h2>10.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>AE 實作</td><td>Argus 3A (硬體加速)</td><td>libcamera 3A（軟體）</td><td>V4L2 auto exposure（有限）</td><td>Argus 3A</td></tr>
+<tr><td>曝光精度</td><td>1 line（~8.3μs @30fps）</td><td>1 line</td><td>1 line</td><td>1 line</td></tr>
+<tr><td>AE 收斂速度</td><td>< 1 sec（典型）</td><td>2–5 sec</td><td>3–8 sec</td><td>1–2 sec</td></tr>
+<tr><td>Flicker 抗制</td><td>100/120Hz hardware detect</td><td>軟體（有限）</td><td>❌</td><td>100/120Hz</td></tr>
+<tr><td>HDR 曝光控制</td><td>Stagger 多曝光</td><td>Single exposure</td><td>❌</td><td>Stagger 多曝光</td></tr>
+<tr><td>AE ROI 限制</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+  </table>
+
+  <h2>10.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「曝光與自動曝光（AE）」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能手動設定 OV9281 的曝光 register，並計算實際曝光時間（line × line_time）。</li>
+    <li>- [ ] 我能監控 AE_CONVERGENCE_STATUS 暫存器判斷收斂狀態。</li>
+    <li>- [ ] 我能完成 AE 7 步量測 SOP，並記錄收斂時間。</li>
+    <li>- [ ] 我能比較四平台的 AE 精度與 flicker 抗制能力。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

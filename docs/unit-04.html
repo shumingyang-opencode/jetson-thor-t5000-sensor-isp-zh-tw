@@ -225,6 +225,76 @@ Step 6 Holoscan
   <li>- [ ] 我能解釋 GPUDirect 對多感測器管線延遲的影響。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>4.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>NVCSI_INT_STATUS</code></td><td><code>0x0c0a0000</code></td><td>CSI 中斷狀態</td><td><code>bit[0]=phy_sync_done, bit[4]=crc_error, bit[8]=ecc_error</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 NVCSI_INT_STATUS 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x0c0a0000</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值</span>
+$ new_value=$(current_value | 0x0001)
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x0c0a0000</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證讀回值與預期一致</span>
+$ devmem2 <span class="hl-n">0x0c0a0000</span> w
+$ [ "$(devmem2 <span class="hl-n">0x0c0a0000</span> w | grep Read)" = "expected" ] && echo "PASS" || echo "FAIL"</pre></div>
+
+  <h2>4.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：V4L2 裝置未出現</div><pre>1. `/dev/video*` 不存在？
+   ├─ `lsmod | grep nvidia` → 驅動未載入
+   │  └─ 確認 kernel module: `modprobe tegra-v4l2` 或 check dmesg
+   └─ module 已載入但無 video device → DT node 問題
+      ├─ `cat /proc/device-tree/soc/csi*/compatible` 確認 compatible string
+      └─ overlay 未 apply → 重跑 ubootOverlayApply</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：Argus/Holoscan pipeline 開啟失敗</div><pre>1. `nvgstcapture-1.0` 出錯？
+   ├─ error "cannot find element" → pipeline config 缺少 sensor element
+   └─ error "device busy" → 另一 process 佔用，`fuser /dev/video0`
+2. Holoscan operator 無法創建？
+   ├─ `libholoscan.so` 未找到 → 確認 LD_LIBRARY_PATH
+   └─ sensor operator 報錯 → 檢查 yaml config 的 sensor type</pre></div>
+
+  <h2>4.20 量測驗證完整 SOP</h2>
+  <p>框架層完整驗證 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>確認 kernel module</td><td><code>`lsmod | grep tegra`</code></td><td>tegra-v4l2, tegra-csi 出現</td></tr>
+      <tr><td>Step 2</td><td>確認 video device</td><td><code>`ls /dev/video*`</code></td><td>/dev/video0 存在</td></tr>
+      <tr><td>Step 3</td><td>V4L2 能力查詢</td><td><code>`v4l2-ctl -d /dev/video0 --info`</code></td><td>Driver info 正確</td></tr>
+      <tr><td>Step 4</td><td>format 列表</td><td><code>`v4l2-ctl -d /dev/video0 --list-formats-ext`</code></td><td>支援 RAW10 等</td></tr>
+      <tr><td>Step 5</td><td>nvgstcapture 測試</td><td><code>`nvgstcapture-1.0 -m 1`</code></td><td>擷取一張 JPEG</td></tr>
+      <tr><td>Step 6</td><td>Holoscan sample</td><td><code>`python3 holoscan_sample.py`</code></td><td>pipeline 正常結束</td></tr>
+      <tr><td>Step 7</td><td>效能基準</td><td><code>`v4l2-ctl --stream-mmap --stream-count=100 --stream-to=/dev/null`</code></td><td>100 幀無 drop</td></tr>
+  </table>
+
+  <h2>4.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>相機框架</td><td>V4L2 + Argus + Holoscan</td><td>V4L2 + libcamera</td><td>V4L2 direct</td><td>V4L2 + Argus</td></tr>
+<tr><td>Device Tree</td><td>overlay + ubootOverlayApply</td><td>dtoverlay= (auto)</td><td>armbianEnv.txt 或 boot.scr</td><td>hardkernel .dtb</td></tr>
+<tr><td>相機 HAL</td><td>NVIDIA Camera HAL</td><td>libcamera (rpi.cam)</td><td>libv4l2</td><td>NVIDIA Camera HAL</td></tr>
+<tr><td>GPU 整合</td><td>Holoscan + CUDA + GPUDirect</td><td>OpenCV (CPU)</td><td>OpenCV (CPU)</td><td>CUDA + nvbufsurface</td></tr>
+<tr><td>多 camera 串流能力</td><td>16 lane, 6+ sensor</td><td>2 sensor</td><td>1 sensor</td><td>4 sensor</td></tr>
+<tr><td>live view 工具</td><td>`nvgstviewer`</td><td>`libcamera-hello`</td><td>ffplay / v4l2-ctl</td><td>`nvgstviewer`</td></tr>
+  </table>
+
+  <h2>4.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「平台相機框架與驅動」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能確認 kernel module 已載入，且 video device 已出現。</li>
+    <li>- [ ] 我能執行 nvgstcapture 並成功擷取影像。</li>
+    <li>- [ ] 我能解釋 NVIDIA Camera HAL 與 libcamera 的架構差異。</li>
+    <li>- [ ] 我能比較四平台的 Device Tree 載入方式。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

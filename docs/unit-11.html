@@ -281,6 +281,82 @@ Step 6 多色溫 + 回歸
   <li>- [ ] 我能避免「拿白牆當灰卡」等常見陷阱。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>11.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>AWB_GAIN_R</code></td><td><code>0x00140100</code></td><td>AWB R channel gain</td><td><code>bit[15:0] = gain (8.8 fixed point)</code></td></tr>
+      <tr><td><code>CCM_MATRIX</code></td><td><code>0x00140200</code></td><td>Color Correction Matrix</td><td><code>3×3 matrix (signed 1.11 fixed point)</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 AWB_GAIN_R 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x00140100</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值（設定 bit[0]=1）</span>
+$ new_value=$((current_value | 0x0001))
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x00140100</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證</span>
+$ devmem2 <span class="hl-n">0x00140100</span> w
+<span class="hl-c"># 確認 bit[0] = 1，其餘 bit 不變</span>
+
+<span class="hl-c"># Step 5: 進階 — bitmask 操作</span>
+$ read_val=$(devmem2 <span class="hl-n">0x00140100</span> w | grep "Read" | awk '{print $NF}')
+$ mask=0x0001
+$ expected=0x0001
+$ [ $(($read_val & $mask)) -eq $expected ] && echo "PASS" || echo "FAIL: bit[0] not set"</pre></div>
+
+  <h2>11.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：色彩偏差（偏色）</div><pre>1. 全面偏紅/偏綠？
+   ├─ AWB 未收斂 → 檢查光源色溫是否在 AWB range
+   └─ CCM matrix 不準 → 重跑白卡校正
+2. 特定光源下偏色？
+   ├─ AWB illuminant 列表不含該光源 → 手動設定 CCM
+   └─ AWB 速度太慢 → 調 AWB speed factor</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：CCM 校正失敗</div><pre>1. 校正後 ΔE > 5？
+   ├─ 白卡拍攝角度不對 → 須正對光源、無反光
+   └─ ISP 前級設定不對 → BLC/LSC 未先校正
+2. CCM 輸出超出 [0,1]？
+   └─ 加 clamp 或調整 offset</pre></div>
+
+  <h2>11.20 量測驗證完整 SOP</h2>
+  <p>AWB/CCM 完整校正 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>環境準備</td><td><code>D65 lightbox + X-Rite ColorChecker</code></td><td>光源 6500K ± 200K</td></tr>
+      <tr><td>Step 2</td><td>BLC 先校正</td><td><code>拍暗場，設定 black level</code></td><td>四通道偏差 < 2 DN</td></tr>
+      <tr><td>Step 3</td><td>LSC 先校正</td><td><code>拍白板，生成 LSC table</code></td><td>四角差 < 5%</td></tr>
+      <tr><td>Step 4</td><td>AWB 開啟</td><td><code>拍白卡，啟用 AWB auto</code></td><td>AWB converged</td></tr>
+      <tr><td>Step 5</td><td>量測 AWB gain</td><td><code>讀 AWB_GAIN_R/B 值</code></td><td>與 D65 預期值接近</td></tr>
+      <tr><td>Step 6</td><td>CCM 校正</td><td><code>拍 ColorChecker，套用校正 matrix</code></td><td>ΔE < 3 (avg)</td></tr>
+      <tr><td>Step 7</td><td>驗證多光源</td><td><code>D50, TL84, A 光源各拍一張</code></td><td>ΔE < 5 所有光源</td></tr>
+  </table>
+
+  <h2>11.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>AWB 算法</td><td>NVIDIA 3A (neural + heuristic)</td><td>libcamera AWB (heuristic)</td><td>無（手動）</td><td>NVIDIA 3A</td></tr>
+<tr><td>CCM 格式</td><td>3×3 + offset (signed 1.11)</td><td>3×3</td><td>N/A</td><td>3×3 + offset</td></tr>
+<tr><td>校正工具</td><td>NVIDIA ISP Visualizer</td><td>`raspistill --settings`</td><td>手動</td><td>NVIDIA ISP Visualizer</td></tr>
+<tr><td>支援光源數</td><td>10+ (D65, TL84, A, H 等)</td><td>3–5</td><td>0（手動）</td><td>8+</td></tr>
+<tr><td>AWB 收斂時間</td><td>< 1 sec</td><td>2–3 sec</td><td>N/A</td><td>1–2 sec</td></tr>
+<tr><td>色彩空間轉換</td><td>RGB→YCbCr + CCM</td><td>RGB→YCbCr</td><td>N/A</td><td>RGB→YCbCr + CCM</td></tr>
+  </table>
+
+  <h2>11.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「白平衡與色彩（AWB/CCM）」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能手動設定 AWB_GAIN_R 暫存器並觀察色調變化。</li>
+    <li>- [ ] 我能建立 CCM 校正 matrix 並驗證 ΔE < 3。</li>
+    <li>- [ ] 我能完成 7 步 AWB/CCM 校正 SOP。</li>
+    <li>- [ ] 我能比較四平台的 AWB 精度與支援光源數。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>

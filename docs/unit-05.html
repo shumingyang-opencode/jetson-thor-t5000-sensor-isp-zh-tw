@@ -241,6 +241,74 @@ Step 6 連續性測試
   <li>- [ ] 我能完成 300 幀連續取流的壓力測試。</li>
   </ul>
 
+
+  <!-- ═══════ Round 3 Deepen: Register Workflow / Multi-layer Diagnostics / Full SOP / Ultimate Platform Comparison / Bring-up Checklist ═══════ -->
+
+  <h2>5.18 Register 位元級完整工作流</h2>
+  <p>本單元涉及的關鍵 register，以及「讀→改→寫→驗證」的完整位元級操作序列：</p>
+  <table>
+    <tr><th>Register</th><th>位址</th><th>功能</th><th>Bit Field 說明</th></tr>
+      <tr><td><code>CSI_PHY_CTRL</code></td><td><code>0x0c090000</code></td><td>CSI PHY 控制</td><td><code>bit[0]=enable, bit[2:1]=data rate mode, bit[3]=lane power down</code></td></tr>
+  </table>
+    <div class="demo-block"><div class="demo-label">讀→改→寫→驗證 完整序列（以 CSI_PHY_CTRL 為例）</div><pre><span class="hl-c"># Step 1: 讀取目前值</span>
+$ devmem2 <span class="hl-n">0x0c090000</span> w
+<span class="hl-c"># 記錄 current_value</span>
+
+<span class="hl-c"># Step 2: 計算新值</span>
+$ new_value=$(current_value | 0x0001)
+
+<span class="hl-c"># Step 3: 寫入</span>
+$ devmem2 <span class="hl-n">0x0c090000</span> w <span class="hl-n">$new_value</span>
+
+<span class="hl-c"># Step 4: 驗證讀回值與預期一致</span>
+$ devmem2 <span class="hl-n">0x0c090000</span> w
+$ [ "$(devmem2 <span class="hl-n">0x0c090000</span> w | grep Read)" = "expected" ] && echo "PASS" || echo "FAIL"</pre></div>
+
+  <h2>5.19 多層疑難排解決策樹</h2>
+    <div class="demo-block"><div class="demo-label">決策樹 1：argus 取流失敗</div><pre>1. `nvgstcapture` 無輸出？
+   ├─ 檢查 sensor 是否 streaming：`v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=1`
+   │  ├─ 成功 → argus 設定問題，檢查 sensor_mode ID
+   │  └─ 失敗 → 回到 sensor bring-up 流程
+   └─ stream 動但 argus 無輸出 → CSI PHY 未啟用
+      └─ 檢查 CSI_PHY_CTRL bit[0]</pre></div>
+    <div class="demo-block"><div class="demo-label">決策樹 2：HSB 取流延遲過高</div><pre>1. 延遲 > 100ms？
+   ├─ 網路層延遲：`ping -c 100 <sensor_ip>` 看 avg/max
+   │  ├─ ping > 1ms → cable/switch 問題
+   │  └─ ping < 1ms → 應用層問題
+   └─ 應用層：Holoscan queue size 過大，減少 buffer 數</pre></div>
+
+  <h2>5.20 量測驗證完整 SOP</h2>
+  <p>首次取流完整 SOP：</p>
+  <table>
+    <tr><th>步驟</th><th>動作</th><th>指令/方法</th><th>預期輸出</th></tr>
+      <tr><td>Step 1</td><td>硬件就緒確認</td><td><code>排線接好、sensor 電源穩定、I2C 可通</code></td><td>i2cdetect 可見</td></tr>
+      <tr><td>Step 2</td><td>DT overlay apply</td><td><code>`sudo ubootOverlayApply && sudo reboot`</code></td><td>dmesg 出現 CSI init</td></tr>
+      <tr><td>Step 3</td><td>V4L2 raw stream</td><td><code>`v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=1 --stream-to=raw.raw`</code></td><td>檔案非零</td></tr>
+      <tr><td>Step 4</td><td>argus stream</td><td><code>`nvgstcapture-1.0 -m 1 -E 1`</code></td><td>JPEG 檔案產生</td></tr>
+      <tr><td>Step 5</td><td>HSB stream（如適用）</td><td><code>Holoscan sensor → GPU pipeline</code></td><td>GPU memory 有分配</td></tr>
+      <tr><td>Step 6</td><td>延遲測量</td><td><code>HSB timestamp - sensor timestamp</code></td><td>< 50ms</td></tr>
+  </table>
+
+  <h2>5.21 四平台終極對照</h2>
+  <table>
+    <tr><th>面向</th><th>Thor T5000</th><th>RPi5</th><th>Orange Pi</th><th>Orin Nano</th></tr>
+<tr><td>取流工具</td><td>`nvgstcapture` / Holoscan</td><td>`libcamera-hello`</td><td>`v4l2-ctl` / `ffplay`</td><td>`nvgstcapture`</td></tr>
+<tr><td>Buffer 管理</td><td>NVMM buffer + GPU direct</td><td>V4L2 MMAP</td><td>V4L2 MMAP</td><td>NVMM buffer</td></tr>
+<tr><td>多感測器取流</td><td>Holoscan graph 同步</td><td>`libcamera-hello -c 2`</td><td>需手動 multiplex</td><td>nvgst 多 pipeline</td></tr>
+<tr><td>延遲目標（sensor→display）</td><td>< 30ms（HSB）</td><td>< 80ms</td><td>< 100ms</td><td>< 50ms</td></tr>
+<tr><td>GPU 直連取流</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>HSB setup 複雜度</td><td>中（需 config yaml）</td><td>N/A</td><td>N/A</td><td>N/A</td></tr>
+  </table>
+
+  <h2>5.22 完整 Bring-up 小 Checklist</h2>
+  <p>針對「第一個鏡頭跑起來」主題的完整 bring-up 步驟清單：</p>
+  <ul>
+    <li>- [ ] 我能用 `v4l2-ctl` 取到第一幀 raw data。</li>
+    <li>- [ ] 我能用 `nvgstcapture` 擷取 JPEG。</li>
+    <li>- [ ] 我能測量 sensor→display 延遲。</li>
+    <li>- [ ] 我能比較四平台的取流工具與 buffer 管理方式。</li>
+  </ul>
+
 </div>
 
 <footer>這是 NVIDIA Jetson Thor T5000 感測器影像調適繁中教學站 · 由 OpenCode 建置<br>
